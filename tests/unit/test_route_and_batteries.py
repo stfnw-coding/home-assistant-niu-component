@@ -189,7 +189,7 @@ class MapRenderTest(unittest.TestCase):
         style = self.render.TILE_STYLES["dark"]
         viewport = self.render.fit_viewport(RIDE, style.tile_size)
         tile = io.BytesIO()
-        Image.new("RGB", (512, 512), (50, 50, 50)).save(tile, "PNG")
+        Image.new("RGB", (style.tile_size, style.tile_size), (240, 240, 230)).save(tile, "PNG")
         tiles = {key: tile.getvalue() for key in viewport.tiles()}
         tiles[viewport.tiles()[0]] = b"broken"
         image = Image.open(

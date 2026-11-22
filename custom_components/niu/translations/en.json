@@ -34,7 +34,7 @@
                     "map_style": "Map style"
                 },
                 "data_description": {
-                    "map_style": "Map tiles used for the last-ride map. All styles are based on OpenStreetMap."
+                    "map_style": "Map tiles used for the last-ride map. Both styles use OpenStreetMap; the dark one is recoloured to match a dark dashboard."
                 }
             }
         }
@@ -42,8 +42,7 @@
     "selector": {
         "map_style": {
             "options": {
-                "dark": "Dark (CARTO)",
-                "light": "Light (CARTO Voyager)",
+                "dark": "Dark",
                 "osm": "OpenStreetMap standard"
             }
         }

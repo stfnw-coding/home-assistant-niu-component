@@ -28,36 +28,55 @@ class TileStyle:
     background: tuple[int, int, int]
     label_background: tuple[int, int, int, int] = (255, 255, 255, 170)
     label_text: tuple[int, int, int] = (40, 40, 40)
+    dark: bool = False
 
 
+OSM_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+OSM_ATTRIBUTION = "© OpenStreetMap-bijdragers"
+
+# CARTO's basemaps now need an API key, so both styles use the standard
+# OpenStreetMap tiles; the dark style is a recoloured version of them.
 TILE_STYLES: dict[str, TileStyle] = {
     MAP_STYLE_DARK: TileStyle(
-        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-        tile_size=512,
-        attribution="© OpenStreetMap-bijdragers © CARTO",
+        url=OSM_URL,
+        tile_size=256,
+        attribution=OSM_ATTRIBUTION,
         route_color=(77, 163, 255),
         casing_color=(10, 25, 50),
         background=(38, 38, 38),
         label_background=(0, 0, 0, 150),
         label_text=(200, 200, 200),
-    ),
-    MAP_STYLE_LIGHT: TileStyle(
-        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png",
-        tile_size=512,
-        attribution="© OpenStreetMap-bijdragers © CARTO",
-        route_color=(37, 99, 235),
-        casing_color=(255, 255, 255),
-        background=(242, 239, 233),
+        dark=True,
     ),
     MAP_STYLE_OSM: TileStyle(
-        url="https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        url=OSM_URL,
         tile_size=256,
-        attribution="© OpenStreetMap-bijdragers",
+        attribution=OSM_ATTRIBUTION,
         route_color=(37, 99, 235),
         casing_color=(255, 255, 255),
         background=(242, 239, 233),
     ),
 }
+# Entries saved with the short-lived "light" style get the standard map.
+TILE_STYLES[MAP_STYLE_LIGHT] = TILE_STYLES[MAP_STYLE_OSM]
+
+
+def darken_tile(tile):
+    """Turn a light OpenStreetMap tile into a dark one.
+
+    Inverting the brightness and rotating the hue by 180 degrees keeps
+    water blue and parks green while making the background dark, the same
+    trick browsers use for dark-mode maps.
+    """
+    from PIL import Image, ImageChops, ImageEnhance
+
+    inverted = ImageChops.invert(tile.convert("RGB"))
+    hue, saturation, value = inverted.convert("HSV").split()
+    hue = hue.point(lambda h: (h + 128) % 256)
+    recoloured = Image.merge("HSV", (hue, saturation, value)).convert("RGB")
+    recoloured = ImageEnhance.Contrast(recoloured).enhance(0.85)
+    return ImageEnhance.Brightness(recoloured).enhance(0.9)
+
 
 START_COLOR = (34, 197, 94)
 END_COLOR = (239, 68, 68)
@@ -156,8 +175,7 @@ def fit_viewport(
 
 def tile_url(style: TileStyle, zoom: int, x: int, y: int) -> str:
     """Return the URL of one tile."""
-    subdomain = "abcd"[(x + y) % 4]
-    return style.url.format(s=subdomain, z=zoom, x=x, y=y)
+    return style.url.format(z=zoom, x=x, y=y)
 
 
 def render_route(
@@ -187,6 +205,8 @@ def render_route(
             continue
         if tile.size != (viewport.tile_size, viewport.tile_size):
             tile = tile.resize((viewport.tile_size, viewport.tile_size))
+        if style.dark:
+            tile = darken_tile(tile)
         image.paste(tile, viewport.tile_offset(tile_x, tile_y))
 
     # Draw the route supersampled so the line comes out smooth.

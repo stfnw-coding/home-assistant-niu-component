@@ -90,7 +90,7 @@ def _detail(self, track_id, date):
 
 def _tile():
     buffer = io.BytesIO()
-    Image.new("RGB", (512, 512), (60, 60, 60)).save(buffer, "PNG")
+    Image.new("RGB", (256, 256), (240, 238, 230)).save(buffer, "PNG")
     return buffer.getvalue()
 
 
@@ -172,7 +172,7 @@ async def test_full_setup(hass: HomeAssistant) -> None:
         image = await async_get_image(hass, camera_id)
         assert image.content_type == "image/png"
         assert Image.open(io.BytesIO(image.content)).size == (1024, 640)
-        assert client.urls and all("cartocdn" in url for url in client.urls)
+        assert client.urls and all("tile.openstreetmap.org" in url for url in client.urls)
         open("/tmp/ha_route.png", "wb").write(image.content)
 
         # A second battery shows up after a swap: new entities appear by themselves.

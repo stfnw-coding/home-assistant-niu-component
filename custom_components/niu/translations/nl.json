@@ -33,7 +33,7 @@
                     "map_style": "Kaartstijl"
                 },
                 "data_description": {
-                    "map_style": "Kaarttegels voor de kaart van de laatste rit. Alle stijlen zijn gebaseerd op OpenStreetMap."
+                    "map_style": "Kaarttegels voor de kaart van de laatste rit. Beide stijlen gebruiken OpenStreetMap; de donkere is omgekleurd voor een donker dashboard."
                 }
             }
         }
@@ -41,8 +41,7 @@
     "selector": {
         "map_style": {
             "options": {
-                "dark": "Donker (CARTO)",
-                "light": "Licht (CARTO Voyager)",
+                "dark": "Donker",
                 "osm": "OpenStreetMap standaard"
             }
         }
