@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.core import callback
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
+from .battery import battery_label
 from .const import (
     CONF_AUTH,
     CONF_SENSORS,
@@ -16,6 +24,7 @@ from .const import (
     SENSOR_TYPE_POS,
     SENSOR_TYPE_TRACK,
     SENSOR_TYPES,
+    SIGNAL_NEW_BATTERY,
 )
 from .coordinator import NiuDataUpdateCoordinator
 from .entity import NiuCoordinatorEntity
@@ -44,7 +53,37 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
             )
         )
 
+    entities.append(NiuInstalledBatterySensor(coordinator))
+    entities.extend(
+        _battery_entities(coordinator, list(coordinator.batteries.batteries))
+    )
     async_add_entities(entities)
+
+    @callback
+    def _add_new_batteries(bms_ids: list[str]) -> None:
+        async_add_entities(_battery_entities(coordinator, bms_ids))
+
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass, SIGNAL_NEW_BATTERY.format(entry.entry_id), _add_new_batteries
+        )
+    )
+
+
+def _battery_entities(coordinator, bms_ids: list[str]) -> list[SensorEntity]:
+    return [
+        NiuBatterySensor(coordinator, bms_id, kind)
+        for bms_id in bms_ids
+        for kind in BATTERY_SENSOR_KINDS
+    ]
+
+
+# kind: (unit, device class, state class, icon)
+BATTERY_SENSOR_KINDS = {
+    "charge": ("%", SensorDeviceClass.BATTERY, SensorStateClass.MEASUREMENT, None),
+    "health": ("%", None, SensorStateClass.MEASUREMENT, "mdi:battery-heart-variant"),
+    "charge_cycles": (None, None, SensorStateClass.TOTAL_INCREASING, "mdi:battery-sync"),
+}
 
 
 class NiuSensor(NiuCoordinatorEntity, SensorEntity):
@@ -118,3 +157,83 @@ class NiuSensor(NiuCoordinatorEntity, SensorEntity):
                 }
             )
         return attributes
+
+
+class NiuInstalledBatterySensor(NiuCoordinatorEntity, SensorEntity):
+    """Which battery is in the scooter right now."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "installed_battery"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_icon = "mdi:battery-arrow-down"
+
+    def __init__(self, coordinator: NiuDataUpdateCoordinator) -> None:
+        NiuCoordinatorEntity.__init__(self, coordinator)
+        self._attr_unique_id = f"niu_scooter_{coordinator.data.sn}_installed_battery"
+
+    @property
+    def options(self) -> list[str]:
+        labels = {battery_label(bms_id) for bms_id in self.coordinator.batteries.batteries}
+        installed = self.coordinator.batteries.installed_label()
+        if installed:
+            labels.add(installed)
+        return [*sorted(labels), "none"]
+
+    @property
+    def native_value(self) -> str:
+        return self.coordinator.batteries.installed_label() or "none"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"bms_ids": sorted(self.coordinator.batteries.installed)}
+
+
+class NiuBatterySensor(NiuCoordinatorEntity, SensorEntity):
+    """Last known value of one battery, whether it is in the scooter or not."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self, coordinator: NiuDataUpdateCoordinator, bms_id: str, kind: str
+    ) -> None:
+        NiuCoordinatorEntity.__init__(self, coordinator)
+        self._bms_id = bms_id
+        self._kind = kind
+        unit, device_class, state_class, icon = BATTERY_SENSOR_KINDS[kind]
+        self._attr_native_unit_of_measurement = unit
+        self._attr_device_class = device_class
+        self._attr_state_class = state_class
+        if icon:
+            self._attr_icon = icon
+        self._attr_translation_key = f"battery_{kind}"
+        self._attr_unique_id = f"niu_scooter_{coordinator.data.sn}_battery_{bms_id}_{kind}"
+        label = battery_label(bms_id)
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"battery_{bms_id}")},
+            name=f"NIU battery {label}",
+            translation_key="battery",
+            translation_placeholders={"label": label},
+            manufacturer="NIU",
+            model="Battery",
+            serial_number=bms_id,
+            via_device=(DOMAIN, "Niu E-scooter"),
+        )
+
+    @property
+    def _record(self) -> dict:
+        return self.coordinator.batteries.batteries.get(self._bms_id, {})
+
+    @property
+    def native_value(self):
+        return self._record.get(self._kind)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        record = self._record
+        return {
+            "bms_id": self._bms_id,
+            "in_scooter": self._bms_id in self.coordinator.batteries.installed,
+            "last_seen": record.get("last_seen"),
+            "last_installed": record.get("last_installed"),
+            "temperature": record.get("temperature"),
+        }

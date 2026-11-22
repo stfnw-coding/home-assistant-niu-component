@@ -58,6 +58,9 @@ class FakeCoordinator:
     def __init__(self, api) -> None:
         self.data = api
         self.last_update_success = True
+        self.batteries = types.SimpleNamespace(
+            batteries={}, installed={}, installed_label=lambda: None
+        )
 
 
 class FakeResponse:
@@ -142,6 +145,7 @@ class EntityTest(unittest.IsolatedAsyncioTestCase):
                     self.const.CONF_SENSORS: ["BatteryCharge", "BatteryGrade"]
                 }
             },
+            async_on_unload=Mock(),
         )
         hass = types.SimpleNamespace(
             data={self.const.DOMAIN: {entry.entry_id: self.coordinator}}
@@ -150,7 +154,11 @@ class EntityTest(unittest.IsolatedAsyncioTestCase):
 
         await self.sensor_module.async_setup_entry(hass, entry, async_add_entities)
 
-        entities = async_add_entities.call_args.args[0]
+        entities = [
+            entity
+            for entity in async_add_entities.call_args.args[0]
+            if hasattr(entity, "_attr_name")
+        ]
         self.assertEqual(
             [entity._attr_name for entity in entities],
             ["NIU Scooter MQi BatteryCharge", "NIU Scooter MQi BatteryGrade"],

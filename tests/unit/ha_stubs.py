@@ -92,6 +92,48 @@ class SensorEntity:
     """SensorEntity stand-in."""
 
 
+class SensorDeviceClass:
+    BATTERY = "battery"
+    ENUM = "enum"
+
+
+class SensorStateClass:
+    MEASUREMENT = "measurement"
+    TOTAL_INCREASING = "total_increasing"
+
+
+class TrackerEntity:
+    """TrackerEntity stand-in."""
+
+
+class SourceType:
+    GPS = "gps"
+
+
+class OptionsFlow:
+    """OptionsFlow stand-in."""
+
+    def async_create_entry(self, *, data):
+        return {"type": "create_entry", "data": data}
+
+    def async_show_form(self, *, step_id, data_schema, errors=None):
+        return {"type": "form", "step_id": step_id, "data_schema": data_schema}
+
+
+class Store:
+    """In-memory storage helper stand-in."""
+
+    def __init__(self, hass, version, key) -> None:
+        self.key = key
+        self.saved = None
+
+    async def async_load(self):
+        return None
+
+    def async_delay_save(self, data_func, delay=0) -> None:
+        self.saved = data_func()
+
+
 class Camera:
     """Camera stand-in."""
 
@@ -132,13 +174,28 @@ def install_homeassistant_stubs() -> None:
     camera.Camera = Camera
     sensor = types.ModuleType("homeassistant.components.sensor")
     sensor.SensorEntity = SensorEntity
+    sensor.SensorDeviceClass = SensorDeviceClass
+    sensor.SensorStateClass = SensorStateClass
+    device_tracker = types.ModuleType("homeassistant.components.device_tracker")
+    device_tracker.TrackerEntity = TrackerEntity
+    device_tracker.SourceType = SourceType
 
     config_entries = types.ModuleType("homeassistant.config_entries")
     config_entries.ConfigFlow = ConfigFlow
     config_entries.ConfigEntry = type("ConfigEntry", (), {})
     config_entries.ConfigFlowResult = dict
+    config_entries.OptionsFlow = OptionsFlow
     core = types.ModuleType("homeassistant.core")
     core.HomeAssistant = type("HomeAssistant", (), {})
+    core.callback = lambda func: func
+    storage = types.ModuleType("homeassistant.helpers.storage")
+    storage.Store = Store
+    dispatcher = types.ModuleType("homeassistant.helpers.dispatcher")
+    dispatcher.sent = []
+    dispatcher.async_dispatcher_send = lambda hass, signal, *args: dispatcher.sent.append(
+        (signal, args)
+    )
+    dispatcher.async_dispatcher_connect = lambda hass, signal, target: (lambda: None)
 
     helpers = types.ModuleType("homeassistant.helpers")
     helpers.__path__ = []
@@ -170,6 +227,9 @@ def install_homeassistant_stubs() -> None:
         "homeassistant.components": components,
         "homeassistant.components.camera": camera,
         "homeassistant.components.sensor": sensor,
+        "homeassistant.components.device_tracker": device_tracker,
+        "homeassistant.helpers.storage": storage,
+        "homeassistant.helpers.dispatcher": dispatcher,
         "homeassistant.config_entries": config_entries,
         "homeassistant.core": core,
         "homeassistant.helpers": helpers,

@@ -15,6 +15,7 @@ from .const import (
     MOTOR_INDEX_API_URI,
     MOTOINFO_ALL_API_URI,
     MOTOINFO_LIST_API_URI,
+    TRACK_DETAIL_API_URI,
     TRACK_LIST_API_URI,
 )
 
@@ -24,6 +25,7 @@ APP_ID = "niu_ktdrr960"
 REQUEST_TIMEOUT = (10, 30)
 TOKEN_REFRESH_MARGIN = 5 * 60
 TOKEN_REFRESH_FALLBACK = 22 * 60 * 60
+TRACK_DETAIL_RETRY_INTERVAL = 30 * 60
 
 
 class NiuApiError(Exception):
@@ -106,6 +108,10 @@ class NiuApi:
         self.dataMoto = None
         self.dataMotoInfo = None
         self.dataTrackInfo = None
+        self.track_points: list[tuple[float, float]] = []
+        self.track_points_id: str | None = None
+        self._track_detail_failed_id: str | None = None
+        self._track_detail_retry_at = 0.0
         self.sn = None
         self.sensor_prefix = ""
 
@@ -378,18 +384,28 @@ class NiuApi:
             "POST", path, headers=headers, data={"sn": self.sn}
         )
 
-    def post_info_track(self, path):
+    def _track_headers(self) -> dict[str, str]:
         is_chinese = self.language.startswith("zh")
         client_id = "Domestic" if is_chinese else "Overseas"
-        headers = {
+        return {
             "Accept-Language": self.language,
             "User-Agent": f"manager/1.0.0 (identifier);clientIdentifier={client_id}",
         }
+
+    def post_info_track(self, path):
         return self._authenticated_request(
             "POST",
             path,
-            headers=headers,
+            headers=self._track_headers(),
             json={"index": "0", "pagesize": 10, "sn": self.sn},
+        )
+
+    def post_track_detail(self, track_id: str, track_date: str):
+        return self._authenticated_request(
+            "POST",
+            TRACK_DETAIL_API_URI,
+            headers=self._track_headers(),
+            json={"sn": self.sn, "trackId": track_id, "date": track_date},
         )
 
     def getDataBatA(self, id_field):
@@ -422,6 +438,20 @@ class NiuApi:
         except (KeyError, TypeError):
             return None
 
+    def getBatteryCompartments(self) -> dict[str, dict]:
+        """Return the raw battery compartments reported by the scooter."""
+        try:
+            compartments = self.dataBat["data"]["batteries"]
+        except (KeyError, TypeError):
+            return {}
+        if not isinstance(compartments, dict):
+            return {}
+        return {
+            name: data
+            for name, data in compartments.items()
+            if isinstance(data, dict)
+        }
+
     def getDataPos(self, id_field):
         try:
             return self.dataMoto["data"]["postion"][id_field]
@@ -434,11 +464,19 @@ class NiuApi:
         except (KeyError, TypeError):
             return None
 
-    def getDataTrack(self, id_field):
+    def getLatestTrack(self) -> dict | None:
+        """Return the newest track from the track list, if any."""
         try:
-            value = self.dataTrackInfo["data"][0][id_field]
+            track = self.dataTrackInfo["data"][0]
         except (IndexError, KeyError, TypeError):
             return None
+        return track if isinstance(track, dict) else None
+
+    def getDataTrack(self, id_field):
+        track = self.getLatestTrack()
+        if track is None or id_field not in track:
+            return None
+        value = track[id_field]
 
         if id_field in ("startTime", "endTime"):
             try:
@@ -485,3 +523,91 @@ class NiuApi:
         result = self.post_info_track(TRACK_LIST_API_URI)
         if result is not None:
             self.dataTrackInfo = result
+
+    def updateTrackDetail(self):
+        """Fetch the GPS points of the newest track once per track."""
+        track = self.getLatestTrack()
+        if track is None:
+            return
+        track_id = track.get("trackId")
+        track_date = track.get("date")
+        if not track_id:
+            return
+        track_id = str(track_id)
+        if track_id == self.track_points_id:
+            return
+        if (
+            track_id == self._track_detail_failed_id
+            and monotonic() < self._track_detail_retry_at
+        ):
+            return
+        if not track_date and track.get("startTime"):
+            try:
+                track_date = datetime.fromtimestamp(
+                    int(track["startTime"]) / 1000
+                ).strftime("%Y%m%d")
+            except (OSError, TypeError, ValueError):
+                track_date = None
+
+        try:
+            result = self.post_track_detail(track_id, str(track_date or ""))
+            points = parse_track_points(result)
+        except NiuRateLimitError:
+            raise
+        except NiuApiError as err:
+            _LOGGER.warning("Could not fetch NIU track details: %s", err)
+            points = []
+
+        if len(points) < 2:
+            _LOGGER.debug("NIU track %s has no usable GPS points", track_id)
+            self._track_detail_failed_id = track_id
+            self._track_detail_retry_at = monotonic() + TRACK_DETAIL_RETRY_INTERVAL
+            return
+
+        _LOGGER.debug("Fetched %d GPS points for NIU track", len(points))
+        self.track_points = points
+        self.track_points_id = track_id
+        self._track_detail_failed_id = None
+
+
+def _coordinate(value) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number
+
+
+def parse_track_points(payload) -> list[tuple[float, float]]:
+    """Turn a /v5/track/detail response into (lat, lng) points in ride order."""
+    try:
+        data = payload["data"]
+    except (KeyError, TypeError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    items = data.get("trackItems")
+    if not isinstance(items, list):
+        return []
+
+    timed: list[tuple[float, int, float, float]] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        lat = _coordinate(item.get("lat"))
+        lng = _coordinate(item.get("lng"))
+        if lat is None or lng is None:
+            continue
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180) or (lat == 0 and lng == 0):
+            continue
+        stamp = _coordinate(item.get("date"))
+        timed.append((stamp if stamp is not None else float("nan"), index, lat, lng))
+
+    if not timed:
+        return []
+    if all(entry[0] == entry[0] for entry in timed):  # every point has a timestamp
+        timed.sort(key=lambda entry: (entry[0], entry[1]))
+    else:
+        # NIU lists the end point first.
+        timed.reverse()
+    return [(lat, lng) for _, _, lat, lng in timed]

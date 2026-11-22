@@ -41,6 +41,12 @@ class FakeApi:
     def updateTrackInfo(self) -> None:
         self.calls.append("track")
 
+    def updateTrackDetail(self) -> None:
+        self.calls.append("track_detail")
+
+    def getBatteryCompartments(self) -> dict:
+        return {}
+
 
 class CoordinatorTest(unittest.IsolatedAsyncioTestCase):
     """Verify one shared and selective polling cycle."""
@@ -86,9 +92,11 @@ class CoordinatorTest(unittest.IsolatedAsyncioTestCase):
                 "battery",
                 "motor",
                 "track",
+                "track_detail",
                 "battery",
                 "motor",
                 "track",
+                "track_detail",
             ],
         )
         self.assertIs(coordinator.data, api)

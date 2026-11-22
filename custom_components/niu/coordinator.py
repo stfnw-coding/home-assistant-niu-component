@@ -7,11 +7,14 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import NiuApi, NiuApiError, NiuRateLimitError
+from .battery import BatteryRegistry
 from .const import (
     DOMAIN,
+    SIGNAL_NEW_BATTERY,
     SENSOR_TYPE_BAT,
     SENSOR_TYPE_BAT2,
     SENSOR_TYPE_DIST,
@@ -25,6 +28,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 POLL_INTERVAL = timedelta(seconds=150)
+BATTERY_SAVE_DELAY = 60
 DEFAULT_RATE_LIMIT_BACKOFF = 300
 MIN_RATE_LIMIT_BACKOFF = 30
 MAX_RATE_LIMIT_BACKOFF = 3600
@@ -48,6 +52,8 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
         config_entry: ConfigEntry,
         api: NiuApi,
         sensor_groups: set[str],
+        batteries: BatteryRegistry | None = None,
+        battery_store=None,
     ) -> None:
         super().__init__(
             hass,
@@ -59,6 +65,8 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
         self.api = api
         self.sensor_groups = frozenset(sensor_groups)
         self._initialized = False
+        self.batteries = batteries or BatteryRegistry()
+        self._battery_store = battery_store
 
     def _sync_update_data(self) -> NiuApi:
         """Initialize once, then update each required endpoint exactly once."""
@@ -82,12 +90,29 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
             self.api.updateMotoInfo()
         if SENSOR_TYPE_TRACK in self.sensor_groups:
             self.api.updateTrackInfo()
+            self.api.updateTrackDetail()
         return self.api
+
+    def _process_batteries(self, api: NiuApi) -> None:
+        """Remember each battery and announce batteries seen for the first time."""
+        if not self.sensor_groups & {SENSOR_TYPE_BAT, SENSOR_TYPE_BAT2}:
+            return
+        new_ids, changed = self.batteries.process(api.getBatteryCompartments())
+        if changed and self._battery_store is not None:
+            self._battery_store.async_delay_save(
+                self.batteries.as_dict, BATTERY_SAVE_DELAY
+            )
+        if new_ids and self.config_entry is not None:
+            async_dispatcher_send(
+                self.hass,
+                SIGNAL_NEW_BATTERY.format(self.config_entry.entry_id),
+                new_ids,
+            )
 
     async def _async_update_data(self) -> NiuApi:
         """Fetch NIU data without blocking Home Assistant's event loop."""
         try:
-            return await self.hass.async_add_executor_job(self._sync_update_data)
+            api = await self.hass.async_add_executor_job(self._sync_update_data)
         except NiuRateLimitError as err:
             retry_after = err.retry_after or DEFAULT_RATE_LIMIT_BACKOFF
             retry_after = max(
@@ -101,3 +126,5 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
             raise UpdateFailed(f"NIU API update failed: {err}") from err
         except Exception as err:
             raise UpdateFailed("Unexpected error while updating NIU data") from err
+        self._process_batteries(api)
+        return api

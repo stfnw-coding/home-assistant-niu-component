@@ -10,10 +10,13 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from collections import OrderedDict
+
 from homeassistant.components.camera import Camera
 from homeassistant.helpers.httpx_client import get_async_client
 
-from .const import DOMAIN
+from .const import CONF_MAP_STYLE, DEFAULT_MAP_STYLE, DOMAIN
+from .map_render import TILE_STYLES, fit_viewport, render_route, tile_url
 from .coordinator import NiuDataUpdateCoordinator
 from .entity import NiuCoordinatorEntity
 
@@ -21,6 +24,13 @@ _LOGGER = logging.getLogger(__name__)
 GET_IMAGE_TIMEOUT = 5
 GET_IMAGE_TOTAL_TIMEOUT = 8
 IMAGE_FAILURE_RETRY_INTERVAL = 60
+TILE_TIMEOUT = 10
+TILE_TOTAL_TIMEOUT = 20
+TILE_CACHE_SIZE = 256
+TILE_USER_AGENT = (
+    "HomeAssistant-NIU-integration "
+    "(+https://github.com/stfnw-coding/home-assistant-niu-component)"
+)
 
 
 def _detect_image_content_type(content: bytes) -> str | None:
@@ -138,11 +148,109 @@ class LastTrackCamera(NiuCoordinatorEntity, Camera):
         self._last_image: bytes | None = None
         self._failed_url: str | None = None
         self._failure_retry_at = 0.0
+        self._route_key: tuple[str, str] | None = None
+        self._route_image: bytes | None = None
+        self._route_failed_key: tuple[str, str] | None = None
+        self._route_retry_at = 0.0
 
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
-        """Return the cached image or download it when the URL changed."""
+        """Return the route map, or NIU's own thumbnail as a fallback."""
+        route_image = await self._async_route_image()
+        if route_image is not None:
+            return route_image
+        return await self._async_thumbnail_image()
+
+    def _map_style(self) -> str:
+        entry = getattr(self.coordinator, "config_entry", None)
+        options = getattr(entry, "options", None) or {}
+        style = options.get(CONF_MAP_STYLE, DEFAULT_MAP_STYLE)
+        return style if style in TILE_STYLES else DEFAULT_MAP_STYLE
+
+    async def _async_route_image(self) -> bytes | None:
+        """Render the newest ride on map tiles when its GPS points are known."""
+        points = getattr(self._api, "track_points", None) or []
+        points_id = getattr(self._api, "track_points_id", None)
+        if len(points) < 2 or points_id is None:
+            return None
+        if str(self._api.getDataTrack("trackId")) != points_id:
+            return None
+
+        style_name = self._map_style()
+        key = (points_id, style_name)
+        if key == self._route_key and self._route_image is not None:
+            return self._route_image
+        if key == self._route_failed_key and monotonic() < self._route_retry_at:
+            return self._route_image
+
+        style = TILE_STYLES[style_name]
+        viewport = fit_viewport(points, style.tile_size)
+        tiles, complete = await self._async_fetch_tiles(style, viewport.tiles())
+        if not tiles:
+            _LOGGER.warning("Could not load any map tiles for the NIU route map")
+            self._route_failed_key = key
+            self._route_retry_at = monotonic() + IMAGE_FAILURE_RETRY_INTERVAL
+            return None
+
+        image = await self.hass.async_add_executor_job(
+            render_route, points, viewport, style, tiles
+        )
+        self.content_type = "image/png"
+        self._route_image = image
+        if complete:
+            self._route_key = key
+            self._route_failed_key = None
+        else:
+            # Show what we have, but try the missing tiles again later.
+            self._route_key = None
+            self._route_failed_key = key
+            self._route_retry_at = monotonic() + IMAGE_FAILURE_RETRY_INTERVAL
+        return image
+
+    async def _async_fetch_tiles(
+        self, style, wanted: list[tuple[int, int, int]]
+    ) -> tuple[dict[tuple[int, int, int], bytes], bool]:
+        """Fetch tiles, reusing the shared tile cache."""
+        cache: OrderedDict = self.hass.data.setdefault(DOMAIN, {}).setdefault(
+            "_tile_cache", OrderedDict()
+        )
+        client = get_async_client(self.hass, verify_ssl=True)
+        result: dict[tuple[int, int, int], bytes] = {}
+
+        async def fetch(tile: tuple[int, int, int]) -> None:
+            cache_key = (style.url, *tile)
+            if cache_key in cache:
+                cache.move_to_end(cache_key)
+                result[tile] = cache[cache_key]
+                return
+            try:
+                response = await client.get(
+                    tile_url(style, *tile),
+                    timeout=TILE_TIMEOUT,
+                    headers={"User-Agent": TILE_USER_AGENT},
+                    follow_redirects=True,
+                )
+                response.raise_for_status()
+            except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.RequestError):
+                _LOGGER.debug("Could not fetch map tile %s", tile)
+                return
+            if _detect_image_content_type(response.content) is None:
+                return
+            result[tile] = response.content
+            cache[cache_key] = response.content
+            while len(cache) > TILE_CACHE_SIZE:
+                cache.popitem(last=False)
+
+        try:
+            async with asyncio.timeout(TILE_TOTAL_TIMEOUT):
+                await asyncio.gather(*(fetch(tile) for tile in wanted))
+        except TimeoutError:
+            _LOGGER.warning("Timed out while loading map tiles for the NIU route map")
+        return result, len(result) == len(wanted)
+
+    async def _async_thumbnail_image(self) -> bytes | None:
+        """Return the cached NIU thumbnail or download it when the URL changed."""
         last_track_url = self._api.getDataTrack("track_thumb")
         if not last_track_url:
             _LOGGER.debug("No NIU last-track thumbnail URL available")

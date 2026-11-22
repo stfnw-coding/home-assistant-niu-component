@@ -1,5 +1,10 @@
 # NIU Home Assistant integration
 
+> Fork of [marcelwestrahome/home-assistant-niu-component](https://github.com/marcelwestrahome/home-assistant-niu-component) with:
+> * **A real route map.** The last-track camera draws the full GPS track of your newest ride (from NIU's `/v5/track/detail` endpoint) on OpenStreetMap-based tiles. NIU's own thumbnail uses Chinese AMap tiles, which have no streets outside China. Pick the map style (dark, light or OpenStreetMap standard) under the integration's *Configure* button. NIU's thumbnail is still used as a fallback.
+> * **Current location** as a GPS `device_tracker`, so the scooter shows up on the map card.
+> * **Swappable batteries.** Every battery that has been in the scooter gets its own device with charge, health and charge-cycle sensors, kept by BMS id, plus a sensor that says which battery is in the scooter now. The last known values of the battery on the shelf are kept when you swap.
+
 This custom component integrates compatible NIU vehicles with Home Assistant.
 
 Now this integration is _asynchronous_ and it is easy installable via config flow.

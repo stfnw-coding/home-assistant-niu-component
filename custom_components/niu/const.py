@@ -6,6 +6,7 @@ MOTOR_INDEX_API_URI = "/v5/scooter/motor_data/index_info"
 MOTOINFO_LIST_API_URI = "/v5/scooter/list"
 MOTOINFO_ALL_API_URI = "/motoinfo/overallTally"
 TRACK_LIST_API_URI = "/v5/track/list/v2"
+TRACK_DETAIL_API_URI = "/v5/track/detail"
 # FIRMWARE_BAS_URL = '/motorota/getfirmwareversion'
 
 DOMAIN = "niu"
@@ -14,6 +15,15 @@ CONF_PASSWORD = "password"
 CONF_SCOOTER_ID = "scooter_id"
 CONF_AUTH = "conf_auth"
 CONF_SENSORS = "sensors_selected"
+CONF_MAP_STYLE = "map_style"
+
+MAP_STYLE_DARK = "dark"
+MAP_STYLE_LIGHT = "light"
+MAP_STYLE_OSM = "osm"
+MAP_STYLES = [MAP_STYLE_DARK, MAP_STYLE_LIGHT, MAP_STYLE_OSM]
+DEFAULT_MAP_STYLE = MAP_STYLE_DARK
+
+SIGNAL_NEW_BATTERY = "niu_new_battery_{}"
 
 DEFAULT_SCOOTER_ID = 0
 

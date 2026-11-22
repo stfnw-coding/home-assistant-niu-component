@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from tests.unit.ha_stubs import clear_niu_modules, install_homeassistant_stubs
 
@@ -38,6 +38,12 @@ class FakeApi:
 
     def updateTrackInfo(self) -> None:
         self.calls.append("track")
+
+    def updateTrackDetail(self) -> None:
+        self.calls.append("track_detail")
+
+    def getBatteryCompartments(self) -> dict:
+        return {}
 
 
 class FakeConfigEntries:
@@ -103,6 +109,9 @@ class ComponentTest(unittest.IsolatedAsyncioTestCase):
             data={self.const.CONF_AUTH: auth},
             unique_id=None,
             title="Niu EScooter Integration",
+            options={},
+            async_on_unload=Mock(),
+            add_update_listener=Mock(),
         )
         hass = FakeHass()
         first_api = FakeApi()
@@ -120,13 +129,14 @@ class ComponentTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await self.component.async_setup_entry(hass, entry))
 
         self.assertEqual(from_hass.call_count, 2)
-        self.assertEqual(first_api.calls, ["initialize", "battery", "track"])
-        self.assertEqual(second_api.calls, ["initialize", "battery", "track"])
-        self.assertEqual(
-            hass.config_entries.forwarded,
-            [("sensor", "camera"), ("sensor", "camera")],
-        )
-        self.assertEqual(hass.config_entries.unloaded, [("sensor", "camera")])
+        # Battery and position data are always polled for the battery
+        # registry and the location tracker.
+        expected = ["initialize", "battery", "motor", "track", "track_detail"]
+        self.assertEqual(first_api.calls, expected)
+        self.assertEqual(second_api.calls, expected)
+        platforms = ("sensor", "device_tracker", "camera")
+        self.assertEqual(hass.config_entries.forwarded, [platforms, platforms])
+        self.assertEqual(hass.config_entries.unloaded, [platforms])
         self.assertEqual(
             hass.config_entries.updated,
             [{"unique_id": "TEST-SN", "title": "NIU – MQi"}],
@@ -145,6 +155,9 @@ class ComponentTest(unittest.IsolatedAsyncioTestCase):
             data={self.const.CONF_AUTH: auth},
             unique_id="EXISTING-SN",
             title="My Scooter",
+            options={},
+            async_on_unload=Mock(),
+            add_update_listener=Mock(),
         )
         hass = FakeHass()
 

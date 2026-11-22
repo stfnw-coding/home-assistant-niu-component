@@ -4,13 +4,14 @@
   "after_dependencies": [],
   "codeowners": [
     "@mwestra",
-    "@pikka97"
-   ],
+    "@pikka97",
+    "@stfnw-coding"
+  ],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/marcelwestrahome/home-assistant-niu-component",
+  "documentation": "https://github.com/stfnw-coding/home-assistant-niu-component",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/marcelwestrahome/home-assistant-niu-component/issues",
+  "issue_tracker": "https://github.com/stfnw-coding/home-assistant-niu-component/issues",
   "requirements": [],
-  "version": "2.1.10"
+  "version": "2.2.0"
 }

@@ -7,7 +7,8 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlowResult, OptionsFlow
+from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .api import (
@@ -23,12 +24,15 @@ from .api import (
 from .const import (
     AVAILABLE_SENSORS,
     CONF_AUTH,
+    CONF_MAP_STYLE,
     CONF_PASSWORD,
     CONF_SCOOTER_ID,
     CONF_SENSORS,
     CONF_USERNAME,
+    DEFAULT_MAP_STYLE,
     DEFAULT_SCOOTER_ID,
     DOMAIN,
+    MAP_STYLES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -57,6 +61,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for the NIU integration."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        """Return the options flow."""
+        return NiuOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -107,3 +117,27 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
         )
+
+
+class NiuOptionsFlow(OptionsFlow):
+    """Let the user pick the look of the route map."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+
+        current = self.config_entry.options.get(CONF_MAP_STYLE, DEFAULT_MAP_STYLE)
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_MAP_STYLE, default=current): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=MAP_STYLES,
+                        translation_key=CONF_MAP_STYLE,
+                        mode=selector.SelectSelectorMode.LIST,
+                    )
+                )
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)

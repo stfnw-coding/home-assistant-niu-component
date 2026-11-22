@@ -1,0 +1,80 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Dit apparaat is al ingesteld"
+        },
+        "error": {
+            "cannot_connect": "Kan geen verbinding maken met NIU. Probeer het later opnieuw.",
+            "invalid_auth": "Het e-mailadres of wachtwoord klopt niet.",
+            "invalid_scooter": "Het gekozen voertuignummer bestaat niet.",
+            "unknown": "NIU gaf een onverwacht antwoord. Probeer het later opnieuw."
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "E-mailadres NIU-account",
+                    "password": "Wachtwoord",
+                    "scooter_id": "Voertuignummer",
+                    "sensors_selected": "Sensoren"
+                },
+                "data_description": {
+                    "username": "Het e-mailadres waarmee je inlogt bij NIU.",
+                    "scooter_id": "Positie van het voertuig in je NIU-account, vanaf 0 (0 is het eerste voertuig).",
+                    "sensors_selected": "Kies de sensoren die je in Home Assistant wilt."
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Routekaart",
+                "data": {
+                    "map_style": "Kaartstijl"
+                },
+                "data_description": {
+                    "map_style": "Kaarttegels voor de kaart van de laatste rit. Alle stijlen zijn gebaseerd op OpenStreetMap."
+                }
+            }
+        }
+    },
+    "selector": {
+        "map_style": {
+            "options": {
+                "dark": "Donker (CARTO)",
+                "light": "Licht (CARTO Voyager)",
+                "osm": "OpenStreetMap standaard"
+            }
+        }
+    },
+    "device": {
+        "battery": {
+            "name": "Batterij {label}"
+        }
+    },
+    "entity": {
+        "device_tracker": {
+            "location": {
+                "name": "Locatie"
+            }
+        },
+        "sensor": {
+            "installed_battery": {
+                "name": "Geplaatste batterij",
+                "state": {
+                    "none": "Geen"
+                }
+            },
+            "battery_charge": {
+                "name": "Lading"
+            },
+            "battery_health": {
+                "name": "Conditie"
+            },
+            "battery_charge_cycles": {
+                "name": "Laadcycli"
+            }
+        }
+    },
+    "title": "NIU"
+}

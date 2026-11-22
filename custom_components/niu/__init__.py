@@ -5,8 +5,10 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 
 from .api import NiuApi
+from .battery import STORAGE_VERSION, BatteryRegistry
 from .const import (
     CONF_AUTH,
     CONF_PASSWORD,
@@ -14,6 +16,8 @@ from .const import (
     CONF_SENSORS,
     CONF_USERNAME,
     DOMAIN,
+    SENSOR_TYPE_BAT,
+    SENSOR_TYPE_POS,
 )
 from .coordinator import NiuDataUpdateCoordinator, required_sensor_groups
 
@@ -43,11 +47,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         niu_auth[CONF_PASSWORD],
         niu_auth[CONF_SCOOTER_ID],
     )
+    battery_store = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}.batteries")
+    batteries = BatteryRegistry(await battery_store.async_load())
     coordinator = NiuDataUpdateCoordinator(
         hass,
         entry,
         api,
-        required_sensor_groups(sensors_selected),
+        # Location and per-battery entities are always available.
+        required_sensor_groups(sensors_selected) | {SENSOR_TYPE_BAT, SENSOR_TYPE_POS},
+        batteries,
+        battery_store,
     )
     await coordinator.async_config_entry_first_refresh()
 
@@ -63,8 +72,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(
         entry, _get_platforms(sensors_selected)
     )
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     return True
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload so a new map style is used right away."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -83,5 +98,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 def _get_platforms(sensors_selected: list[str]) -> tuple[str, ...]:
     """Return an immutable, per-entry platform list."""
     if "LastTrackThumb" in sensors_selected:
-        return ("sensor", "camera")
-    return ("sensor",)
+        return ("sensor", "device_tracker", "camera")
+    return ("sensor", "device_tracker")

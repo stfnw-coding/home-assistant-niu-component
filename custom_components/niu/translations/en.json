@@ -25,5 +25,56 @@
             }
         }
     },
-    "title": "NIU"
+    "title": "NIU",
+    "options": {
+        "step": {
+            "init": {
+                "title": "Route map",
+                "data": {
+                    "map_style": "Map style"
+                },
+                "data_description": {
+                    "map_style": "Map tiles used for the last-ride map. All styles are based on OpenStreetMap."
+                }
+            }
+        }
+    },
+    "selector": {
+        "map_style": {
+            "options": {
+                "dark": "Dark (CARTO)",
+                "light": "Light (CARTO Voyager)",
+                "osm": "OpenStreetMap standard"
+            }
+        }
+    },
+    "device": {
+        "battery": {
+            "name": "Battery {label}"
+        }
+    },
+    "entity": {
+        "device_tracker": {
+            "location": {
+                "name": "Location"
+            }
+        },
+        "sensor": {
+            "installed_battery": {
+                "name": "Installed battery",
+                "state": {
+                    "none": "None"
+                }
+            },
+            "battery_charge": {
+                "name": "Charge"
+            },
+            "battery_health": {
+                "name": "Health"
+            },
+            "battery_charge_cycles": {
+                "name": "Charge cycles"
+            }
+        }
+    }
 }
