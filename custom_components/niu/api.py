@@ -400,13 +400,48 @@ class NiuApi:
             json={"index": "0", "pagesize": 10, "sn": self.sn},
         )
 
+    def _detail_header_variants(self) -> list[tuple[str, dict[str, str]]]:
+        is_chinese = self.language.startswith("zh")
+        client_id = "Domestic" if is_chinese else "Overseas"
+        return [
+            (
+                "app",
+                {
+                    "Accept-Language": self.language,
+                    "User-Agent": (
+                        "manager/4.10.4 (iPhone; iOS 16.4.1);brand=Unknown;"
+                        f"model=Unknown;clientIdentifier={client_id};lang={self.language}"
+                    ),
+                },
+            ),
+            ("locale", self._locale_headers()),
+            ("track", self._track_headers()),
+        ]
+
     def post_track_detail(self, track_id: str, track_date: str):
-        return self._authenticated_request(
-            "POST",
-            TRACK_DETAIL_API_URI,
-            headers=self._track_headers(),
-            json={"sn": self.sn, "trackId": track_id, "date": track_date},
-        )
+        """Fetch one track's GPS points.
+
+        NIU's own apps send the token in the body as well as in the header,
+        and the endpoint is picky about the client it talks to, so try the
+        known client identities until one returns points.
+        """
+        result = None
+        for name, headers in self._detail_header_variants():
+            result = self._authenticated_request(
+                "POST",
+                TRACK_DETAIL_API_URI,
+                headers=headers,
+                json={
+                    "sn": self.sn,
+                    "trackId": track_id,
+                    "date": track_date,
+                    "token": self.token,
+                },
+            )
+            if len(parse_track_points(result)) >= 2:
+                _LOGGER.debug("NIU track detail answered for the %s client", name)
+                return result
+        return result
 
     def getDataBatA(self, id_field):
         try:
@@ -549,6 +584,11 @@ class NiuApi:
             except (OSError, TypeError, ValueError):
                 track_date = None
 
+        _LOGGER.debug(
+            "Fetching NIU track detail (date %s, track fields: %s)",
+            track_date,
+            ", ".join(sorted(track)),
+        )
         try:
             result = self.post_track_detail(track_id, str(track_date or ""))
             points = parse_track_points(result)
