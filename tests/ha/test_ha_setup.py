@@ -206,6 +206,24 @@ async def test_full_setup(hass: HomeAssistant) -> None:
         assert old_charge.attributes["in_scooter"] is False
         assert hass.states.get(by_unique["niu_scooter_SN123_installed_battery"]).state == "0049"
 
+        # Battery taken out: the placeholder 0 % must not reach the sensors.
+        BATTERY["compartmentA"] = {
+            "bmsId": "BN1GPC2B55100049",
+            "isConnected": True,
+            "batteryCharging": 0,
+            "chargedTimes": "297",
+            "gradeBattery": "70.3",
+            "temperature": 18,
+        }
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+        charge_a = hass.states.get(by_unique["sensor.niu_scooter_SN123_battery_charge_a"])
+        assert charge_a.state == "unknown"
+        assert hass.states.get(by_unique["niu_scooter_SN123_installed_battery"]).state == "none"
+        assert hass.states.get(
+            by_unique["niu_scooter_SN123_battery_BN1GPC2B55100049_charge"]
+        ).state == "95"
+
         # Options flow switches the map style and reloads.
         result = await hass.config_entries.options.async_init(entry.entry_id)
         assert result["type"] == "form"

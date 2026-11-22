@@ -74,6 +74,7 @@ def darken_tile(tile):
     hue, saturation, value = inverted.convert("HSV").split()
     hue = hue.point(lambda h: (h + 128) % 256)
     recoloured = Image.merge("HSV", (hue, saturation, value)).convert("RGB")
+    recoloured = ImageEnhance.Color(recoloured).enhance(0.6)
     recoloured = ImageEnhance.Contrast(recoloured).enhance(0.85)
     return ImageEnhance.Brightness(recoloured).enhance(0.9)
 

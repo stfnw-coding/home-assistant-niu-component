@@ -11,7 +11,7 @@ from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
-from .battery import battery_label
+from .battery import battery_label, compartment_is_present
 from .const import (
     CONF_AUTH,
     CONF_SENSORS,
@@ -78,6 +78,16 @@ def _battery_entities(coordinator, bms_ids: list[str]) -> list[SensorEntity]:
     ]
 
 
+# Values that only mean something while a battery is in the compartment.
+BATTERY_ONLY_FIELDS = {
+    "batteryCharging",
+    "chargedTimes",
+    "gradeBattery",
+    "temperature",
+    "temperatureDesc",
+    "centreCtrlBattery",
+}
+
 # kind: (unit, device class, state class, icon)
 BATTERY_SENSOR_KINDS = {
     "charge": ("%", SensorDeviceClass.BATTERY, SensorStateClass.MEASUREMENT, None),
@@ -114,11 +124,20 @@ class NiuSensor(NiuCoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         """Return a value from the coordinator's cached API response."""
-        if self._sensor_group == SENSOR_TYPE_BAT:
-            return self._api.getDataBatA(self._data_field)
-        if self._sensor_group == SENSOR_TYPE_BAT2:
+        if self._sensor_group in (SENSOR_TYPE_BAT, SENSOR_TYPE_BAT2):
+            compartment = (
+                "compartmentA" if self._sensor_group == SENSOR_TYPE_BAT else "compartmentB"
+            )
+            if self._data_field in BATTERY_ONLY_FIELDS and not self._battery_present(
+                compartment
+            ):
+                return None
+            if self._sensor_group == SENSOR_TYPE_BAT:
+                return self._api.getDataBatA(self._data_field)
             return self._api.getDataBatB(self._data_field)
         if self._sensor_group == SENSOR_TYPE_MOTO:
+            if self._data_field in BATTERY_ONLY_FIELDS and not self._battery_present():
+                return None
             return self._api.getDataMoto(self._data_field)
         if self._sensor_group == SENSOR_TYPE_POS:
             return self._api.getDataPos(self._data_field)
@@ -129,6 +148,24 @@ class NiuSensor(NiuCoordinatorEntity, SensorEntity):
         if self._sensor_group == SENSOR_TYPE_TRACK:
             return self._api.getDataTrack(self._data_field)
         return None
+
+    def _battery_present(self, compartment: str | None = None) -> bool:
+        """Whether a (specific) compartment holds a battery with real data.
+
+        Without a battery NIU reports placeholder values (0 % charge, 0 % for
+        the internal battery, 100 % health), which would trigger low-battery
+        automations; such sensors report "unknown" instead.
+        """
+        get = getattr(self._api, "getBatteryCompartments", None)
+        if get is None:
+            return True
+        compartments = get()
+        if not compartments:
+            return True
+        if compartment is not None:
+            data = compartments.get(compartment)
+            return data is None or compartment_is_present(data)
+        return any(compartment_is_present(data) for data in compartments.values())
 
     @property
     def extra_state_attributes(self) -> dict | None:
