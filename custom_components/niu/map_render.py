@@ -173,6 +173,72 @@ def fit_viewport(
     )
 
 
+LOCATION_ZOOM = 16
+
+
+def center_viewport(
+    lat: float,
+    lng: float,
+    tile_size: int,
+    zoom: int = LOCATION_ZOOM,
+    width: int = IMAGE_WIDTH,
+    height: int = IMAGE_HEIGHT,
+) -> Viewport:
+    """A viewport centred on one point."""
+    x, y = project(lat, lng, zoom, tile_size)
+    return Viewport(
+        zoom=zoom,
+        left=x - width / 2,
+        top=y - height / 2,
+        width=width,
+        height=height,
+        tile_size=tile_size,
+    )
+
+
+def render_location(
+    lat: float,
+    lng: float,
+    viewport: Viewport,
+    style: TileStyle,
+    tiles: dict[tuple[int, int, int], bytes],
+    accuracy_m: float | None = None,
+) -> bytes:
+    """Draw the scooter's current position on map tiles."""
+    from PIL import Image, ImageDraw
+
+    base = Image.open(io.BytesIO(render_route([(lat, lng)], viewport, style, tiles, [])))
+    factor = SUPERSAMPLE
+    width, height = viewport.width, viewport.height
+    overlay = Image.new("RGBA", (width * factor, height * factor), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    x, y = viewport.to_image(lat, lng)
+    x, y = x * factor, y * factor
+
+    if accuracy_m:
+        metres_per_pixel = (
+            math.cos(math.radians(lat)) * 40075016.686
+            / (viewport.tile_size * 2**viewport.zoom)
+        )
+        radius = accuracy_m / metres_per_pixel * factor
+        if radius > 14 * factor:
+            draw.ellipse(
+                (x - radius, y - radius, x + radius, y + radius),
+                fill=(*style.route_color, 50),
+                outline=(*style.route_color, 140),
+                width=2 * factor,
+            )
+    for size, color in ((22, (255, 255, 255, 255)), (16, (*style.route_color, 255))):
+        r = size * factor / 2
+        draw.ellipse((x - r, y - r, x + r, y + r), fill=color)
+
+    overlay = overlay.resize((width, height), Image.Resampling.LANCZOS)
+    image = Image.alpha_composite(base.convert("RGBA"), overlay)
+    output = io.BytesIO()
+    image.convert("RGB").save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
 def tile_url(style: TileStyle, zoom: int, x: int, y: int) -> str:
     """Return the URL of one tile."""
     return style.url.format(z=zoom, x=x, y=y)
@@ -237,10 +303,15 @@ def render_route(
         for x, y in (coords[0], coords[-1]):
             draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color)
 
-    stroke((*style.casing_color, 200), 11 * factor)
-    stroke((*style.route_color, 255), 6 * factor)
+    if len(points) < 2 and not segments:
+        coords = []
+    else:
+        stroke((*style.casing_color, 200), 11 * factor)
+        stroke((*style.route_color, 255), 6 * factor)
 
-    for (x, y), color in ((coords[0], START_COLOR), (coords[-1], END_COLOR)):
+    for (x, y), color in (
+        ((coords[0], START_COLOR), (coords[-1], END_COLOR)) if coords else ()
+    ):
         outer = 11 * factor
         inner = 7 * factor
         draw.ellipse((x - outer, y - outer, x + outer, y + outer), fill=(255, 255, 255, 255))

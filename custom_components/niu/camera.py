@@ -16,7 +16,14 @@ from homeassistant.components.camera import Camera
 from homeassistant.helpers.httpx_client import get_async_client
 
 from .const import CONF_MAP_STYLE, DEFAULT_MAP_STYLE, DOMAIN
-from .map_render import TILE_STYLES, fit_viewport, render_route, tile_url
+from .map_render import (
+    TILE_STYLES,
+    center_viewport,
+    fit_viewport,
+    render_location,
+    render_route,
+    tile_url,
+)
 from .thumb_route import route_from_thumbnail
 from .coordinator import NiuDataUpdateCoordinator
 from .entity import NiuCoordinatorEntity
@@ -130,7 +137,9 @@ def _invalid_image_description(content: bytes) -> str:
 async def async_setup_entry(hass, entry, async_add_entities) -> None:
     """Set up the last-track camera from a config entry."""
     coordinator: NiuDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([LastTrackCamera(hass, coordinator)])
+    async_add_entities(
+        [LastTrackCamera(hass, coordinator), LocationMapCamera(hass, coordinator)]
+    )
 
 
 class LastTrackCamera(NiuCoordinatorEntity, Camera):
@@ -402,3 +411,58 @@ class LastTrackCamera(NiuCoordinatorEntity, Camera):
         self._failed_url = last_track_url
         self._failure_retry_at = monotonic() + IMAGE_FAILURE_RETRY_INTERVAL
         return self._last_image
+
+
+class LocationMapCamera(LastTrackCamera):
+    """Still image of the scooter's current position on OpenStreetMap."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "location_map"
+
+    def __init__(self, hass, coordinator: NiuDataUpdateCoordinator) -> None:
+        super().__init__(hass, coordinator)
+        # Let the translation name the entity instead of the inherited name.
+        del self._attr_name
+        self._attr_unique_id = f"niu_scooter_{self._api.sn}_location_map"
+        self._location_key: tuple | None = None
+        self._location_image: bytes | None = None
+
+    def _position(self) -> tuple[float, float] | None:
+        try:
+            lat = float(self._api.getDataPos("lat"))
+            lng = float(self._api.getDataPos("lng"))
+        except (TypeError, ValueError):
+            return None
+        if lat == 0 and lng == 0:
+            return None
+        return lat, lng
+
+    async def async_camera_image(
+        self, width: int | None = None, height: int | None = None
+    ) -> bytes | None:
+        position = self._position()
+        if position is None:
+            return self._location_image
+        try:
+            accuracy = float(self._api.getDataMoto("hdop") or 0) * 5
+        except (TypeError, ValueError):
+            accuracy = 0
+        style_name = self._map_style()
+        # About 1 m resolution: GPS jitter of a parked scooter keeps the cache.
+        key = (round(position[0], 5), round(position[1], 5), style_name)
+        if key == self._location_key and self._location_image is not None:
+            return self._location_image
+
+        style = TILE_STYLES[style_name]
+        viewport = center_viewport(*position, style.tile_size)
+        tiles, complete = await self._async_fetch_tiles(style, viewport.tiles())
+        if not tiles:
+            _LOGGER.warning("Could not load any map tiles for the NIU location map")
+            return self._location_image
+        image = await self.hass.async_add_executor_job(
+            render_location, *position, viewport, style, tiles, accuracy
+        )
+        self.content_type = "image/png"
+        self._location_image = image
+        self._location_key = key if complete else None
+        return image

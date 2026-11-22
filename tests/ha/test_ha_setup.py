@@ -168,7 +168,13 @@ async def test_full_setup(hass: HomeAssistant) -> None:
         assert battery_device is not None
         print("battery device name:", battery_device.name, "| entities:", sorted(by_unique.values()))
 
-        camera_id = [e for e in by_unique.values() if e.startswith("camera.")][0]
+        location_camera = by_unique["niu_scooter_SN123_location_map"]
+        print("location camera:", location_camera)
+        image = await async_get_image(hass, location_camera)
+        assert Image.open(io.BytesIO(image.content)).size == (1024, 640)
+        open("/tmp/ha_location.png", "wb").write(image.content)
+
+        camera_id = by_unique["Niu N1s Last Track Camera"]
         image = await async_get_image(hass, camera_id)
         assert image.content_type == "image/png"
         assert Image.open(io.BytesIO(image.content)).size == (1024, 640)

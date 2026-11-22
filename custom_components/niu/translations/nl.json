@@ -73,6 +73,11 @@
             "battery_charge_cycles": {
                 "name": "Laadcycli"
             }
+        },
+        "camera": {
+            "location_map": {
+                "name": "Locatiekaart"
+            }
         }
     },
     "title": "NIU"

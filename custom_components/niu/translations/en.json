@@ -74,6 +74,11 @@
             "battery_charge_cycles": {
                 "name": "Charge cycles"
             }
+        },
+        "camera": {
+            "location_map": {
+                "name": "Location map"
+            }
         }
     }
 }
