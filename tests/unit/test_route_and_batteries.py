@@ -119,7 +119,7 @@ class TrackDetailTest(unittest.TestCase):
         with patch.object(api, "post_track_detail", return_value=payload) as post:
             api.updateTrackDetail()
             api.updateTrackDetail()
-        post.assert_called_once_with("T1", "20261120", None)
+        post.assert_called_once_with("T1", "20261120")
         self.assertEqual(api.track_points_id, "T1")
         self.assertEqual(len(api.track_points), 2)
 
@@ -259,3 +259,65 @@ class BatteryRegistryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ThumbnailTraceTest(unittest.TestCase):
+    """Redraw the route from a synthetic NIU-style thumbnail."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        sys.path.insert(0, str(REPOSITORY_ROOT))
+
+    def setUp(self) -> None:
+        install_homeassistant_stubs()
+        clear_niu_modules()
+        self.trace = importlib.import_module("custom_components.niu.thumb_route")
+        self.render = importlib.import_module("custom_components.niu.map_render")
+
+    def _thumbnail(self, start_px, end_px):
+        try:
+            from PIL import Image, ImageDraw
+        except ImportError:  # pragma: no cover
+            self.skipTest("Pillow not installed")
+        image = Image.new("RGB", (400, 400), (251, 248, 241))
+        draw = ImageDraw.Draw(image)
+        middle = (start_px[0] - 60, (start_px[1] + end_px[1]) / 2)
+        draw.line([start_px, middle, end_px], fill=(66, 107, 242), width=8)
+        # Start pin head above its tip, end pin with its tip on the end point.
+        sx, sy = start_px
+        draw.ellipse((sx - 14, sy - 40, sx + 14, sy - 12), fill=(110, 155, 248))
+        ex, ey = end_px
+        draw.polygon([(ex - 14, ey - 30), (ex + 14, ey - 30), (ex, ey)], fill=(223, 24, 43))
+        buffer = io.BytesIO()
+        image.save(buffer, "PNG")
+        return buffer.getvalue()
+
+    def test_route_lands_between_the_ride_ends(self) -> None:
+        start, end = (52.401, 4.934), (52.385, 4.910)
+        # Place the pins where a north-up map of this ride would put them.
+        sm = complex(*self.render.project(*start, 0, 256))
+        em = complex(*self.render.project(*end, 0, 256))
+        scale = 250 / abs(em - sm)
+        start_px = (300, 60)
+        end_px = (
+            300 + (em - sm).real * scale,
+            60 + (em - sm).imag * scale,
+        )
+        segments = self.trace.route_from_thumbnail(
+            self._thumbnail(start_px, end_px), start, end
+        )
+        self.assertTrue(segments)
+        points = [p for segment in segments for p in segment]
+        nearest_end = min(
+            abs(lat - end[0]) + abs(lng - end[1]) for lat, lng in points
+        )
+        self.assertLess(nearest_end, 0.001)
+        for lat, lng in points:
+            self.assertTrue(52.38 < lat < 52.41 and 4.90 < lng < 4.94)
+
+    def test_rotated_pins_are_rejected(self) -> None:
+        # Pins left/right while the coordinates run north/south.
+        segments = self.trace.route_from_thumbnail(
+            self._thumbnail((320, 200), (80, 210)), (52.40, 4.92), (52.38, 4.92)
+        )
+        self.assertIsNone(segments)

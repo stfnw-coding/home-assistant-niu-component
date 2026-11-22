@@ -165,8 +165,14 @@ def render_route(
     viewport: Viewport,
     style: TileStyle,
     tiles: dict[tuple[int, int, int], bytes],
+    segments: list[tuple[tuple[float, float], tuple[float, float]]] | None = None,
 ) -> bytes:
-    """Compose tiles, route and markers into a PNG image."""
+    """Compose tiles, route and markers into a PNG image.
+
+    The route is either the polyline through ``points`` or, when given,
+    ``segments`` (pairs of coordinates); the start and end markers go on the
+    first and last of ``points``.
+    """
     from PIL import Image, ImageDraw, ImageFont
 
     width, height = viewport.width, viewport.height
@@ -192,9 +198,22 @@ def render_route(
         for x, y in (viewport.to_image(lat, lng) for lat, lng in points)
     ]
 
+    def to_overlay(lat: float, lng: float) -> tuple[float, float]:
+        x, y = viewport.to_image(lat, lng)
+        return x * factor, y * factor
+
     def stroke(color: tuple[int, ...], line_width: int) -> None:
-        draw.line(coords, fill=color, width=line_width, joint="curve")
         radius = line_width / 2
+        if segments:
+            for first, second in segments:
+                a, b = to_overlay(*first), to_overlay(*second)
+                draw.line((a, b), fill=color, width=line_width)
+                draw.ellipse(
+                    (a[0] - radius, a[1] - radius, a[0] + radius, a[1] + radius),
+                    fill=color,
+                )
+            return
+        draw.line(coords, fill=color, width=line_width, joint="curve")
         for x, y in (coords[0], coords[-1]):
             draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color)
 

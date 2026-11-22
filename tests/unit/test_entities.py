@@ -51,6 +51,9 @@ class FakeApi:
     def hasSecondBattery(self):
         return True
 
+    def getLatestTrackEnds(self):
+        return None
+
 
 class FakeCoordinator:
     """Coordinator carrying one shared API object."""

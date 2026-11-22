@@ -25,7 +25,7 @@ APP_ID = "niu_ktdrr960"
 REQUEST_TIMEOUT = (10, 30)
 TOKEN_REFRESH_MARGIN = 5 * 60
 TOKEN_REFRESH_FALLBACK = 22 * 60 * 60
-TRACK_DETAIL_RETRY_INTERVAL = 30 * 60
+TRACK_DETAIL_RETRY_INTERVAL = 6 * 60 * 60
 
 
 class NiuApiError(Exception):
@@ -112,7 +112,6 @@ class NiuApi:
         self.track_points_id: str | None = None
         self._track_detail_failed_id: str | None = None
         self._track_detail_retry_at = 0.0
-        self._detail_variant: tuple[str, str, str] | None = None
         self.sn = None
         self.sensor_prefix = ""
 
@@ -419,55 +418,25 @@ class NiuApi:
             ("track", self._track_headers()),
         ]
 
-    def post_track_detail(self, track_id: str, track_date: str, alt_id: str | None = None):
-        """Fetch one track's GPS points.
+    def post_track_detail(self, track_id: str, track_date: str):
+        """Fetch one track's GPS points the way NIU's own apps ask for them.
 
-        The request NIU expects is not documented and has changed over the
-        years, so try the known variants (client identity, which id, JSON or
-        form body) until one returns points, and remember the one that works.
+        For overseas accounts NIU currently answers with an empty point
+        list; the camera then falls back to tracing the route from NIU's
+        thumbnail.
         """
-        ids = [("trackId", track_id)]
-        if alt_id and alt_id != track_id:
-            ids.append(("id", alt_id))
-        variants = [
-            (header_name, headers, id_name, id_value, encoding)
-            for id_name, id_value in ids
-            for encoding in ("json", "form")
-            for header_name, headers in self._detail_header_variants()
-        ]
-        if self._detail_variant is not None:
-            variants.sort(key=lambda v: (v[0], v[2], v[4]) != self._detail_variant)
-
-        result = None
-        for header_name, headers, id_name, id_value, encoding in variants:
-            body = {
+        _, headers = self._detail_header_variants()[0]
+        return self._authenticated_request(
+            "POST",
+            TRACK_DETAIL_API_URI,
+            headers=headers,
+            json={
                 "sn": self.sn,
-                "trackId": id_value,
+                "trackId": track_id,
                 "date": track_date,
                 "token": self.token,
-            }
-            kwargs = {"json": body} if encoding == "json" else {"data": body}
-            try:
-                result = self._authenticated_request(
-                    "POST", TRACK_DETAIL_API_URI, headers=headers, **kwargs
-                )
-            except NiuRateLimitError:
-                raise
-            except NiuApiError as err:
-                _LOGGER.debug(
-                    "NIU track detail (%s client, %s, %s body) failed: %s",
-                    header_name, id_name, encoding, err,
-                )
-                continue
-            count = len(parse_track_points(result))
-            _LOGGER.debug(
-                "NIU track detail (%s client, %s, %s body): %d points",
-                header_name, id_name, encoding, count,
-            )
-            if count >= 2:
-                self._detail_variant = (header_name, id_name, encoding)
-                return result
-        return result
+            },
+        )
 
     def getDataBatA(self, id_field):
         try:
@@ -532,6 +501,25 @@ class NiuApi:
         except (IndexError, KeyError, TypeError):
             return None
         return track if isinstance(track, dict) else None
+
+    def getLatestTrackEnds(self) -> tuple[tuple[float, float], tuple[float, float]] | None:
+        """Return the (lat, lng) start and end of the newest track."""
+        track = self.getLatestTrack()
+        if track is None:
+            return None
+        ends = []
+        for key in ("startPoint", "lastPoint"):
+            point = track.get(key)
+            if not isinstance(point, dict):
+                return None
+            try:
+                lat, lng = float(point["lat"]), float(point["lng"])
+            except (KeyError, TypeError, ValueError):
+                return None
+            if lat == 0 and lng == 0:
+                return None
+            ends.append((lat, lng))
+        return ends[0], ends[1]
 
     def getDataTrack(self, id_field):
         track = self.getLatestTrack()
@@ -616,12 +604,7 @@ class NiuApi:
             ", ".join(sorted(track)),
         )
         try:
-            alt_id = track.get("id")
-            result = self.post_track_detail(
-                track_id,
-                str(track_date or ""),
-                str(alt_id) if alt_id is not None else None,
-            )
+            result = self.post_track_detail(track_id, str(track_date or ""))
             points = parse_track_points(result)
             if len(points) < 2:
                 _LOGGER.debug(

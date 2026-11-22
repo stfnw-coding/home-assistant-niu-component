@@ -17,6 +17,7 @@ from homeassistant.helpers.httpx_client import get_async_client
 
 from .const import CONF_MAP_STYLE, DEFAULT_MAP_STYLE, DOMAIN
 from .map_render import TILE_STYLES, fit_viewport, render_route, tile_url
+from .thumb_route import route_from_thumbnail
 from .coordinator import NiuDataUpdateCoordinator
 from .entity import NiuCoordinatorEntity
 
@@ -148,10 +149,13 @@ class LastTrackCamera(NiuCoordinatorEntity, Camera):
         self._last_image: bytes | None = None
         self._failed_url: str | None = None
         self._failure_retry_at = 0.0
-        self._route_key: tuple[str, str] | None = None
+        self._route_key: tuple | None = None
         self._route_image: bytes | None = None
-        self._route_failed_key: tuple[str, str] | None = None
+        self._route_image_key: tuple | None = None
+        self._route_failed_key: tuple | None = None
         self._route_retry_at = 0.0
+        self._traced_key: tuple | None = None
+        self._traced_segments = None
 
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
@@ -160,7 +164,14 @@ class LastTrackCamera(NiuCoordinatorEntity, Camera):
         route_image = await self._async_route_image()
         if route_image is not None:
             return route_image
-        return await self._async_thumbnail_image()
+        thumbnail = await self._async_thumbnail_image()
+        if thumbnail is None:
+            return None
+        traced = await self._async_traced_route_image(thumbnail)
+        if traced is not None:
+            return traced
+        self.content_type = _detect_image_content_type(thumbnail) or self.content_type
+        return thumbnail
 
     def _map_style(self) -> str:
         entry = getattr(self.coordinator, "config_entry", None)
@@ -177,15 +188,46 @@ class LastTrackCamera(NiuCoordinatorEntity, Camera):
         if str(self._api.getDataTrack("trackId")) != points_id:
             return None
 
+        return await self._async_render((points_id, "gps"), points, None)
+
+    async def _async_traced_route_image(self, thumbnail: bytes) -> bytes | None:
+        """Trace the route in NIU's thumbnail and redraw it on map tiles."""
+        ends = self._api.getLatestTrackEnds()
+        if ends is None:
+            return None
+        track_id = self._api.getDataTrack("trackId")
+        if not track_id:
+            return None
+        key = (str(track_id), "thumbnail")
+        if key != self._traced_key:
+            self._traced_key = key
+            try:
+                self._traced_segments = await self.hass.async_add_executor_job(
+                    route_from_thumbnail, thumbnail, ends[0], ends[1]
+                )
+            except Exception:  # noqa: BLE001 - never lose the thumbnail over this
+                _LOGGER.exception("Could not trace the route in the NIU thumbnail")
+                self._traced_segments = None
+            if not self._traced_segments:
+                _LOGGER.debug("Could not find the route in the NIU thumbnail")
+        if not self._traced_segments:
+            return None
+        return await self._async_render(key, list(ends), self._traced_segments)
+
+    async def _async_render(self, source_key, points, segments) -> bytes | None:
+        """Render a route on map tiles, cached per track, source and style."""
         style_name = self._map_style()
-        key = (points_id, style_name)
+        key = (*source_key, style_name)
         if key == self._route_key and self._route_image is not None:
             return self._route_image
         if key == self._route_failed_key and monotonic() < self._route_retry_at:
-            return self._route_image
+            return self._route_image if self._route_image_key == key else None
 
         style = TILE_STYLES[style_name]
-        viewport = fit_viewport(points, style.tile_size)
+        extent = list(points)
+        if segments:
+            extent.extend(point for segment in segments for point in segment)
+        viewport = fit_viewport(extent, style.tile_size)
         tiles, complete = await self._async_fetch_tiles(style, viewport.tiles())
         if not tiles:
             _LOGGER.warning("Could not load any map tiles for the NIU route map")
@@ -194,10 +236,11 @@ class LastTrackCamera(NiuCoordinatorEntity, Camera):
             return None
 
         image = await self.hass.async_add_executor_job(
-            render_route, points, viewport, style, tiles
+            render_route, points, viewport, style, tiles, segments
         )
         self.content_type = "image/png"
         self._route_image = image
+        self._route_image_key = key
         if complete:
             self._route_key = key
             self._route_failed_key = None
