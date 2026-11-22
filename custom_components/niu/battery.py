@@ -32,7 +32,9 @@ def compartment_is_present(compartment: dict[str, Any]) -> bool:
     """Return whether a compartment holds a battery that reports real data.
 
     When the battery is taken out NIU keeps reporting the old BMS id with
-    placeholder values: 0 % charge, 0 cycles and 100 % health.
+    placeholder values, such as 0 % charge, 0 cycles or 100 % health. A
+    battery in use never reports 0 % (the BMS shuts down before that), so a
+    zero charge is treated as an empty compartment.
     """
     if not compartment.get("bmsId"):
         return False
@@ -41,7 +43,7 @@ def compartment_is_present(compartment: dict[str, Any]) -> bool:
         return False
     charge = _number(compartment.get("batteryCharging"))
     cycles = _number(compartment.get("chargedTimes"))
-    if not charge and not cycles:
+    if not charge or not cycles:
         return False
     return True
 

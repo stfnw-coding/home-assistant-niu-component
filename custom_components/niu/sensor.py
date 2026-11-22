@@ -216,7 +216,6 @@ class NiuBatterySensor(NiuCoordinatorEntity, SensorEntity):
             manufacturer="NIU",
             model="Battery",
             serial_number=bms_id,
-            via_device=(DOMAIN, "Niu E-scooter"),
         )
 
     @property

@@ -552,6 +552,10 @@ class NiuApi:
         try:
             result = self.post_track_detail(track_id, str(track_date or ""))
             points = parse_track_points(result)
+            if len(points) < 2:
+                _LOGGER.debug(
+                    "NIU track detail response shape: %s", describe_shape(result)
+                )
         except NiuRateLimitError:
             raise
         except NiuApiError as err:
@@ -578,29 +582,77 @@ def _coordinate(value) -> float | None:
     return number
 
 
+LAT_KEYS = ("lat", "latitude", "la")
+LNG_KEYS = ("lng", "lon", "longitude", "lo")
+TIME_KEYS = ("date", "time", "timestamp", "gpsTime", "gps_time", "t")
+
+
+def describe_shape(value, depth: int = 0) -> str:
+    """Describe the structure of a JSON value without its contents."""
+    if depth > 4:
+        return "..."
+    if isinstance(value, dict):
+        inner = ", ".join(
+            f"{key}: {describe_shape(item, depth + 1)}"
+            for key, item in list(value.items())[:15]
+        )
+        return "{" + inner + "}"
+    if isinstance(value, list):
+        if not value:
+            return "[]"
+        return f"[{len(value)} x {describe_shape(value[0], depth + 1)}]"
+    return type(value).__name__
+
+
+def _first(item: dict, keys: tuple[str, ...]):
+    for key in keys:
+        if key in item:
+            return item[key]
+    return None
+
+
+def _point_lists(value, depth: int = 0):
+    """Yield every list of dicts that look like GPS points, at any depth."""
+    if depth > 5:
+        return
+    if isinstance(value, list):
+        dicts = [item for item in value if isinstance(item, dict)]
+        if dicts and any(
+            _first(item, LAT_KEYS) is not None and _first(item, LNG_KEYS) is not None
+            for item in dicts[:5]
+        ):
+            yield dicts
+        for item in value[:5]:
+            yield from _point_lists(item, depth + 1)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _point_lists(item, depth + 1)
+
+
 def parse_track_points(payload) -> list[tuple[float, float]]:
     """Turn a /v5/track/detail response into (lat, lng) points in ride order."""
-    try:
-        data = payload["data"]
-    except (KeyError, TypeError):
+    if not isinstance(payload, dict):
         return []
-    if not isinstance(data, dict):
+    data = payload.get("data")
+    if isinstance(data, dict) and isinstance(data.get("trackItems"), list):
+        candidates = [data["trackItems"]]
+    else:
+        candidates = list(_point_lists(data))
+    if not candidates:
         return []
-    items = data.get("trackItems")
-    if not isinstance(items, list):
-        return []
+    items = max(candidates, key=len)
 
     timed: list[tuple[float, int, float, float]] = []
     for index, item in enumerate(items):
         if not isinstance(item, dict):
             continue
-        lat = _coordinate(item.get("lat"))
-        lng = _coordinate(item.get("lng"))
+        lat = _coordinate(_first(item, LAT_KEYS))
+        lng = _coordinate(_first(item, LNG_KEYS))
         if lat is None or lng is None:
             continue
         if not (-90 <= lat <= 90 and -180 <= lng <= 180) or (lat == 0 and lng == 0):
             continue
-        stamp = _coordinate(item.get("date"))
+        stamp = _coordinate(_first(item, TIME_KEYS))
         timed.append((stamp if stamp is not None else float("nan"), index, lat, lng))
 
     if not timed:

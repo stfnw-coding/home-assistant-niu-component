@@ -87,6 +87,22 @@ class TrackDetailTest(unittest.TestCase):
             self.api_module.parse_track_points(payload), [(1.0, 1.0), (2.0, 2.0)]
         )
 
+    def test_points_are_found_under_other_keys(self) -> None:
+        payload = {
+            "data": {
+                "track": {
+                    "points": [
+                        {"latitude": "52.1", "longitude": "4.1", "time": 2},
+                        {"latitude": "52.0", "longitude": "4.0", "time": 1},
+                    ]
+                }
+            }
+        }
+        self.assertEqual(
+            self.api_module.parse_track_points(payload), [(52.0, 4.0), (52.1, 4.1)]
+        )
+        self.assertIn("points", self.api_module.describe_shape(payload))
+
     def test_bad_payloads_give_no_points(self) -> None:
         for payload in (None, {}, {"data": None}, {"data": {"trackItems": "x"}}):
             self.assertEqual(self.api_module.parse_track_points(payload), [])
@@ -230,6 +246,10 @@ class BatteryRegistryTest(unittest.TestCase):
         self.assertIn("BN1GPC2B55100049", restored.batteries)
         new_ids, _ = restored.process({"compartmentA": PRESENT}, _now)
         self.assertEqual(new_ids, [])
+
+    def test_zero_charge_with_old_cycle_count_counts_as_removed(self) -> None:
+        compartment = {**OTHER, "batteryCharging": 0}
+        self.assertFalse(self.battery.compartment_is_present(compartment))
 
     def test_disconnected_compartment_is_ignored(self) -> None:
         compartment = {**PRESENT, "isConnected": False}
