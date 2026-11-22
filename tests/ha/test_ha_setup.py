@@ -76,7 +76,7 @@ def _update_track(self):
     }
 
 
-def _detail(self, track_id, date):
+def _detail(self, track_id, date, alt_id=None):
     return {
         "data": {
             "trackItems": [

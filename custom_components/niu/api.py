@@ -112,6 +112,7 @@ class NiuApi:
         self.track_points_id: str | None = None
         self._track_detail_failed_id: str | None = None
         self._track_detail_retry_at = 0.0
+        self._detail_variant: tuple[str, str, str] | None = None
         self.sn = None
         self.sensor_prefix = ""
 
@@ -418,28 +419,53 @@ class NiuApi:
             ("track", self._track_headers()),
         ]
 
-    def post_track_detail(self, track_id: str, track_date: str):
+    def post_track_detail(self, track_id: str, track_date: str, alt_id: str | None = None):
         """Fetch one track's GPS points.
 
-        NIU's own apps send the token in the body as well as in the header,
-        and the endpoint is picky about the client it talks to, so try the
-        known client identities until one returns points.
+        The request NIU expects is not documented and has changed over the
+        years, so try the known variants (client identity, which id, JSON or
+        form body) until one returns points, and remember the one that works.
         """
+        ids = [("trackId", track_id)]
+        if alt_id and alt_id != track_id:
+            ids.append(("id", alt_id))
+        variants = [
+            (header_name, headers, id_name, id_value, encoding)
+            for id_name, id_value in ids
+            for encoding in ("json", "form")
+            for header_name, headers in self._detail_header_variants()
+        ]
+        if self._detail_variant is not None:
+            variants.sort(key=lambda v: (v[0], v[2], v[4]) != self._detail_variant)
+
         result = None
-        for name, headers in self._detail_header_variants():
-            result = self._authenticated_request(
-                "POST",
-                TRACK_DETAIL_API_URI,
-                headers=headers,
-                json={
-                    "sn": self.sn,
-                    "trackId": track_id,
-                    "date": track_date,
-                    "token": self.token,
-                },
+        for header_name, headers, id_name, id_value, encoding in variants:
+            body = {
+                "sn": self.sn,
+                "trackId": id_value,
+                "date": track_date,
+                "token": self.token,
+            }
+            kwargs = {"json": body} if encoding == "json" else {"data": body}
+            try:
+                result = self._authenticated_request(
+                    "POST", TRACK_DETAIL_API_URI, headers=headers, **kwargs
+                )
+            except NiuRateLimitError:
+                raise
+            except NiuApiError as err:
+                _LOGGER.debug(
+                    "NIU track detail (%s client, %s, %s body) failed: %s",
+                    header_name, id_name, encoding, err,
+                )
+                continue
+            count = len(parse_track_points(result))
+            _LOGGER.debug(
+                "NIU track detail (%s client, %s, %s body): %d points",
+                header_name, id_name, encoding, count,
             )
-            if len(parse_track_points(result)) >= 2:
-                _LOGGER.debug("NIU track detail answered for the %s client", name)
+            if count >= 2:
+                self._detail_variant = (header_name, id_name, encoding)
                 return result
         return result
 
@@ -590,7 +616,12 @@ class NiuApi:
             ", ".join(sorted(track)),
         )
         try:
-            result = self.post_track_detail(track_id, str(track_date or ""))
+            alt_id = track.get("id")
+            result = self.post_track_detail(
+                track_id,
+                str(track_date or ""),
+                str(alt_id) if alt_id is not None else None,
+            )
             points = parse_track_points(result)
             if len(points) < 2:
                 _LOGGER.debug(

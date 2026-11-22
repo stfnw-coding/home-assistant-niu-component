@@ -119,7 +119,7 @@ class TrackDetailTest(unittest.TestCase):
         with patch.object(api, "post_track_detail", return_value=payload) as post:
             api.updateTrackDetail()
             api.updateTrackDetail()
-        post.assert_called_once_with("T1", "20261120")
+        post.assert_called_once_with("T1", "20261120", None)
         self.assertEqual(api.track_points_id, "T1")
         self.assertEqual(len(api.track_points), 2)
 
