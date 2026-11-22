@@ -1,5 +1,8 @@
 # NIU Home Assistant integration
 
+> [!WARNING]
+> **This fork is vibe-coded.** The changes below were written by an AI (Claude, via Claude Code) on behalf of the repository owner, who is not a professional developer. They were checked with unit tests and a test run in a real Home Assistant instance with mocked NIU data, and are used on the owner's own scooter, but they have not been reviewed line by line by a human. Use at your own risk, and read the code before you rely on it. Commits made by the AI carry a `Co-Authored-By: Claude` trailer.
+
 > Fork of [marcelwestrahome/home-assistant-niu-component](https://github.com/marcelwestrahome/home-assistant-niu-component) with:
 > * **A real route map.** The last-track camera draws the full GPS track of your newest ride (from NIU's `/v5/track/detail` endpoint) on OpenStreetMap-based tiles. NIU's own thumbnail uses Chinese AMap tiles, which have no streets outside China. Pick the map style (dark, light or OpenStreetMap standard) under the integration's *Configure* button. NIU's thumbnail is still used as a fallback.
 > * **Current location** as a GPS `device_tracker`, so the scooter shows up on the map card.
