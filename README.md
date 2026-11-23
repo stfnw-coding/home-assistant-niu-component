@@ -21,6 +21,7 @@ limit: 15            # rides per page
 compact: false       # true: no "more" button
 more_path: /dashboard/rides   # optional: link to a page with the full log
 show_summary: true   # today / this week / this month totals
+expand_first: false  # unfold the newest ride
 ```
 
 This custom component integrates compatible NIU vehicles with Home Assistant.
