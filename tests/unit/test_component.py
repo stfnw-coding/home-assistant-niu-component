@@ -23,6 +23,19 @@ class FakeApi:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.dataTrackInfo = None
+
+    def get_tracks(self, index=0, pagesize=5) -> list:
+        return []
+
+    def get_cycling_statistics(self, sortby=3) -> list:
+        return []
+
+    def get_firmware(self):
+        return None
+
+    def get_messages(self) -> list:
+        return []
 
     def initialize(self) -> None:
         self.calls.append("initialize")
@@ -77,6 +90,7 @@ class FakeHass:
             language="de",
             country="AT",
             time_zone="Europe/Vienna",
+            path=lambda *parts: "/tmp/niu-test-config/" + "/".join(parts),
         )
 
     async def async_add_executor_job(self, target, *args):
@@ -134,7 +148,7 @@ class ComponentTest(unittest.IsolatedAsyncioTestCase):
         expected = ["initialize", "battery", "motor", "track", "track_detail"]
         self.assertEqual(first_api.calls, expected)
         self.assertEqual(second_api.calls, expected)
-        platforms = ("sensor", "device_tracker", "camera")
+        platforms = ("sensor", "binary_sensor", "device_tracker", "camera")
         self.assertEqual(hass.config_entries.forwarded, [platforms, platforms])
         self.assertEqual(hass.config_entries.unloaded, [platforms])
         self.assertEqual(

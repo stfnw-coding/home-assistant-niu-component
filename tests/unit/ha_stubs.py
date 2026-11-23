@@ -95,6 +95,8 @@ class SensorEntity:
 class SensorDeviceClass:
     BATTERY = "battery"
     ENUM = "enum"
+    TIMESTAMP = "timestamp"
+    DISTANCE = "distance"
 
 
 class SensorStateClass:
@@ -222,8 +224,38 @@ def install_homeassistant_stubs() -> None:
     update_coordinator.DataUpdateCoordinator = DataUpdateCoordinator
     update_coordinator.UpdateFailed = UpdateFailed
 
+    from datetime import datetime, timezone
+
+    http = types.ModuleType("homeassistant.components.http")
+    http.StaticPathConfig = lambda *args, **kwargs: args
+    websocket_api = types.ModuleType("homeassistant.components.websocket_api")
+    websocket_api.ActiveConnection = object
+    websocket_api.websocket_command = lambda schema: (lambda func: func)
+    websocket_api.async_register_command = lambda hass, handler: None
+    binary_sensor = types.ModuleType("homeassistant.components.binary_sensor")
+    binary_sensor.BinarySensorEntity = type("BinarySensorEntity", (), {})
+    binary_sensor.BinarySensorDeviceClass = types.SimpleNamespace(
+        BATTERY_CHARGING="battery_charging", POWER="power"
+    )
+    const = types.ModuleType("homeassistant.const")
+    const.EntityCategory = types.SimpleNamespace(DIAGNOSTIC="diagnostic")
+    const.UnitOfLength = types.SimpleNamespace(KILOMETERS="km")
+    util = types.ModuleType("homeassistant.util")
+    util.__path__ = []
+    dt = types.ModuleType("homeassistant.util.dt")
+    dt.utcnow = lambda: datetime.now(timezone.utc)
+    dt.now = lambda: datetime.now().astimezone()
+    dt.utc_from_timestamp = lambda ts: datetime.fromtimestamp(ts, timezone.utc)
+    util.dt = dt
+
     modules = {
         "homeassistant": homeassistant,
+        "homeassistant.components.http": http,
+        "homeassistant.components.websocket_api": websocket_api,
+        "homeassistant.components.binary_sensor": binary_sensor,
+        "homeassistant.const": const,
+        "homeassistant.util": util,
+        "homeassistant.util.dt": dt,
         "homeassistant.components": components,
         "homeassistant.components.camera": camera,
         "homeassistant.components.sensor": sensor,
@@ -243,6 +275,7 @@ def install_homeassistant_stubs() -> None:
     voluptuous = types.ModuleType("voluptuous")
     voluptuous.Schema = lambda schema: schema
     voluptuous.Required = lambda key, **kwargs: key
+    voluptuous.Optional = lambda key, **kwargs: key
     voluptuous.All = lambda *validators: validators
     voluptuous.Coerce = lambda target: target
     voluptuous.Range = lambda **kwargs: kwargs
@@ -256,6 +289,7 @@ def install_homeassistant_stubs() -> None:
     httpx.TimeoutException = TimeoutException
     httpx.RequestError = RequestError
     httpx.HTTPStatusError = HTTPStatusError
+    httpx.HTTPError = Exception
     sys.modules["httpx"] = httpx
 
 

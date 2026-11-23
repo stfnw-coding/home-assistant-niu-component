@@ -73,11 +73,52 @@
             },
             "battery_charge_cycles": {
                 "name": "Charge cycles"
+            },
+            "last_gps_fix": {
+                "name": "Last GPS fix"
+            },
+            "last_contact": {
+                "name": "Last mobile connection"
+            },
+            "gps_signal": {
+                "name": "GPS signal"
+            },
+            "gsm_signal": {
+                "name": "Mobile signal"
+            },
+            "rides_today": {
+                "name": "Rides today"
+            },
+            "mileage_today": {
+                "name": "Distance today"
+            },
+            "mileage_month": {
+                "name": "Distance this month"
+            },
+            "mileage_year": {
+                "name": "Distance this year"
+            },
+            "firmware": {
+                "name": "Firmware"
+            },
+            "last_message": {
+                "name": "Last NIU message"
             }
         },
         "camera": {
             "location_map": {
                 "name": "Location map"
+            }
+        },
+        "binary_sensor": {
+            "charging": {
+                "name": "Charging"
+            },
+            "ignition": {
+                "name": "Ignition"
+            },
+            "alarm_armed": {
+                "name": "Alarm armed"
             }
         }
     }

@@ -25,6 +25,19 @@ class FakeApi:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.dataTrackInfo = None
+
+    def get_tracks(self, index=0, pagesize=5) -> list:
+        return []
+
+    def get_cycling_statistics(self, sortby=3) -> list:
+        return []
+
+    def get_firmware(self):
+        return None
+
+    def get_messages(self) -> list:
+        return []
 
     def initialize(self) -> None:
         self.calls.append("initialize")

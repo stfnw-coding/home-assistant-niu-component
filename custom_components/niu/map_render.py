@@ -251,6 +251,9 @@ def render_route(
     style: TileStyle,
     tiles: dict[tuple[int, int, int], bytes],
     segments: list[tuple[tuple[float, float], tuple[float, float]]] | None = None,
+    *,
+    draw_line: bool = True,
+    image_format: str = "PNG",
 ) -> bytes:
     """Compose tiles, route and markers into a PNG image.
 
@@ -306,6 +309,8 @@ def render_route(
 
     if len(points) < 2 and not segments:
         coords = []
+    elif not draw_line and not segments:
+        pass  # markers only: the route itself is unknown
     else:
         stroke((*style.casing_color, 200), 11 * factor)
         stroke((*style.route_color, 255), 6 * factor)
@@ -344,5 +349,8 @@ def render_route(
     )
 
     output = io.BytesIO()
-    image.convert("RGB").save(output, format="PNG", optimize=True)
+    if image_format.upper() == "JPEG":
+        image.convert("RGB").save(output, format="JPEG", quality=82, optimize=True)
+    else:
+        image.convert("RGB").save(output, format="PNG", optimize=True)
     return output.getvalue()

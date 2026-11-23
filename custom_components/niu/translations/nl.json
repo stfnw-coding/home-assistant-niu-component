@@ -72,11 +72,52 @@
             },
             "battery_charge_cycles": {
                 "name": "Laadcycli"
+            },
+            "last_gps_fix": {
+                "name": "Laatste GPS-fix"
+            },
+            "last_contact": {
+                "name": "Laatste SIM-verbinding"
+            },
+            "gps_signal": {
+                "name": "GPS-signaal"
+            },
+            "gsm_signal": {
+                "name": "GSM-signaal"
+            },
+            "rides_today": {
+                "name": "Ritten vandaag"
+            },
+            "mileage_today": {
+                "name": "Kilometers vandaag"
+            },
+            "mileage_month": {
+                "name": "Kilometers deze maand"
+            },
+            "mileage_year": {
+                "name": "Kilometers dit jaar"
+            },
+            "firmware": {
+                "name": "Firmware"
+            },
+            "last_message": {
+                "name": "Laatste NIU-melding"
             }
         },
         "camera": {
             "location_map": {
                 "name": "Locatiekaart"
+            }
+        },
+        "binary_sensor": {
+            "charging": {
+                "name": "Laden"
+            },
+            "ignition": {
+                "name": "Contact"
+            },
+            "alarm_armed": {
+                "name": "Alarm ingeschakeld"
             }
         }
     },

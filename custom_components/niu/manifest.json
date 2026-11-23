@@ -1,17 +1,22 @@
 {
   "domain": "niu",
   "name": "NIU",
-  "after_dependencies": [],
+  "after_dependencies": [
+    "frontend"
+  ],
   "codeowners": [
     "@mwestra",
     "@pikka97",
     "@stfnw-coding"
   ],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": [
+    "http",
+    "websocket_api"
+  ],
   "documentation": "https://github.com/stfnw-coding/home-assistant-niu-component",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/stfnw-coding/home-assistant-niu-component/issues",
   "requirements": [],
-  "version": "2.2.0"
+  "version": "2.3.0"
 }

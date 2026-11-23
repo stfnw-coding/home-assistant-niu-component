@@ -1,0 +1,271 @@
+"""A persistent log of the scooter's rides."""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+import hashlib
+import math
+import secrets
+from typing import Any
+
+STORAGE_VERSION = 1
+# Rides kept in the log; about a year of daily commuting.
+MAX_RIDES = 1000
+# How far back the first backfill reads the ride history.
+BACKFILL_DAYS = 120
+# Ride-list pages read per backfill step (one step per polling cycle).
+BACKFILL_PAGES_PER_STEP = 4
+BACKFILL_MAX_PAGES = 120
+
+
+def _number(value) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(number) or math.isinf(number):
+        return None
+    return number
+
+
+def _point(value) -> list[float] | None:
+    if not isinstance(value, dict):
+        return None
+    lat, lng = _number(value.get("lat")), _number(value.get("lng"))
+    if lat is None or lng is None or (lat == 0 and lng == 0):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    return [round(lat, 6), round(lng, 6)]
+
+
+def _iso(ms: float | None) -> str | None:
+    if ms is None or ms <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def ride_from_track(track: dict) -> dict[str, Any] | None:
+    """Turn one /v5/track/list/v2 item into a ride record."""
+    track_id = track.get("trackId")
+    start_ms = _number(track.get("startTime"))
+    if not track_id or start_ms is None:
+        return None
+    end_ms = _number(track.get("endTime"))
+    duration = _number(track.get("ridingtime"))
+    if duration is None and end_ms is not None:
+        duration = max(0.0, (end_ms - start_ms) / 1000)
+    distance = _number(track.get("distance"))
+    thumb = track.get("track_thumb")
+    return {
+        "id": str(track_id),
+        "start": _iso(start_ms),
+        "end": _iso(end_ms),
+        "date": str(track.get("date") or ""),
+        "distance_m": round(distance) if distance is not None else None,
+        "duration_s": round(duration) if duration is not None else None,
+        "avg_speed": _number(track.get("avespeed")),
+        "consumption": _number(track.get("power_consumption")),
+        "start_point": _point(track.get("startPoint")),
+        "end_point": _point(track.get("lastPoint")),
+        "thumb": thumb if isinstance(thumb, str) and thumb else None,
+    }
+
+
+# Fields that come from NIU and are refreshed when a ride is seen again.
+_NIU_FIELDS = (
+    "start",
+    "end",
+    "date",
+    "distance_m",
+    "duration_s",
+    "avg_speed",
+    "consumption",
+    "start_point",
+    "end_point",
+    "thumb",
+)
+
+
+class RideLog:
+    """All rides seen so far, with the map and place names worked out for them."""
+
+    def __init__(self, data: dict | None = None) -> None:
+        data = data or {}
+        rides = data.get("rides")
+        self.rides: dict[str, dict] = (
+            {ride["id"]: ride for ride in rides if isinstance(ride, dict) and "id" in ride}
+            if isinstance(rides, list)
+            else {}
+        )
+        self.salt: str = data.get("salt") or secrets.token_hex(8)
+        self.backfill_index: int | None = data.get("backfill_index", 0)
+        self.places: dict[str, str] = dict(data.get("places") or {})
+
+    def as_dict(self) -> dict:
+        return {
+            "rides": self.ordered(),
+            "salt": self.salt,
+            "backfill_index": self.backfill_index,
+            "places": self.places,
+        }
+
+    def ordered(self) -> list[dict]:
+        """Rides newest first."""
+        return sorted(
+            self.rides.values(), key=lambda ride: ride.get("start") or "", reverse=True
+        )
+
+    def merge(self, tracks: list[dict]) -> tuple[list[str], bool]:
+        """Add or refresh rides; return the ids of new rides and whether anything changed."""
+        new_ids: list[str] = []
+        changed = False
+        for track in tracks:
+            ride = ride_from_track(track)
+            if ride is None:
+                continue
+            existing = self.rides.get(ride["id"])
+            if existing is None:
+                self.rides[ride["id"]] = ride
+                new_ids.append(ride["id"])
+                changed = True
+                continue
+            for field in _NIU_FIELDS:
+                if ride[field] is not None and existing.get(field) != ride[field]:
+                    existing[field] = ride[field]
+                    changed = True
+                    if field in ("thumb", "start_point", "end_point"):
+                        # The route changed: draw the map again.
+                        existing.pop("map", None)
+                        existing.pop("map_source", None)
+        if len(self.rides) > MAX_RIDES:
+            for ride in self.ordered()[MAX_RIDES:]:
+                del self.rides[ride["id"]]
+            changed = True
+        return new_ids, changed
+
+    def map_filename(self, ride_id: str) -> str:
+        """A file name that cannot be guessed from the ride id."""
+        digest = hashlib.sha256(f"{self.salt}:{ride_id}".encode()).hexdigest()[:24]
+        return f"{digest}.jpg"
+
+    def needing_map(self) -> list[dict]:
+        return [ride for ride in self.ordered() if not ride.get("map")]
+
+    def needing_places(self) -> list[dict]:
+        return [
+            ride
+            for ride in self.ordered()
+            if ("from" not in ride and ride.get("start_point"))
+            or ("to" not in ride and ride.get("end_point"))
+        ]
+
+    @property
+    def backfilling(self) -> bool:
+        return self.backfill_index is not None
+
+    def backfill_page(self, tracks: list[dict], page_size: int, now: datetime) -> None:
+        """Account for one page of older rides read during the backfill."""
+        assert self.backfill_index is not None
+        self.backfill_index += page_size
+        oldest_wanted = now - timedelta(days=BACKFILL_DAYS)
+        starts = [
+            _number(track.get("startTime")) for track in tracks if isinstance(track, dict)
+        ]
+        starts = [start for start in starts if start is not None]
+        if (
+            len(tracks) < page_size
+            or not starts
+            or min(starts) / 1000 < oldest_wanted.timestamp()
+            or self.backfill_index >= BACKFILL_MAX_PAGES * page_size
+        ):
+            self.backfill_index = None
+
+
+def place_key(point: list[float]) -> str:
+    """Cache key for a place name: about 10 m resolution."""
+    return f"{point[0]:.4f},{point[1]:.4f}"
+
+
+def distance_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+    lat1, lng1, lat2, lng2 = map(math.radians, (*a, *b))
+    h = (
+        math.sin((lat2 - lat1) / 2) ** 2
+        + math.cos(lat1) * math.cos(lat2) * math.sin((lng2 - lng1) / 2) ** 2
+    )
+    return 2 * 6371000 * math.asin(math.sqrt(h))
+
+
+def zone_name(point: list[float], zones: list[dict]) -> str | None:
+    """Name of the smallest zone the point lies in."""
+    best: tuple[float, str] | None = None
+    for zone in zones:
+        try:
+            centre = (float(zone["latitude"]), float(zone["longitude"]))
+            radius = float(zone.get("radius") or 0)
+        except (KeyError, TypeError, ValueError):
+            continue
+        # Allow some GPS slack around the zone edge.
+        if distance_m((point[0], point[1]), centre) <= radius + 50:
+            if best is None or radius < best[0]:
+                best = (radius, zone["name"])
+    return best[1] if best else None
+
+
+def address_label(payload: dict) -> str | None:
+    """A short "Street 12, Town" label from a Nominatim reverse response."""
+    if not isinstance(payload, dict):
+        return None
+    address = payload.get("address")
+    if not isinstance(address, dict):
+        return payload.get("name") or None
+    street = next(
+        (
+            address[key]
+            for key in ("road", "pedestrian", "cycleway", "footway", "path", "square")
+            if address.get(key)
+        ),
+        None,
+    )
+    number = address.get("house_number")
+    town = next(
+        (
+            address[key]
+            for key in ("city", "town", "village", "municipality")
+            if address.get(key)
+        ),
+        None,
+    )
+    area = address.get("suburb") or address.get("neighbourhood")
+    first = f"{street} {number}" if street and number else street or area or payload.get("name")
+    if first and town:
+        return f"{first}, {town}"
+    return first or town
+
+
+def summarize(rides: list[dict], now: datetime) -> dict[str, Any]:
+    """Totals for today, this week and this month (local time ``now``)."""
+    today = now.date()
+    week_start = today - timedelta(days=today.weekday())
+    month_start = today.replace(day=1)
+    tz = now.tzinfo
+    totals = {
+        key: {"rides": 0, "km": 0.0}
+        for key in ("today", "week", "month")
+    }
+    for ride in rides:
+        try:
+            day = datetime.fromisoformat(ride["start"]).astimezone(tz).date()
+        except (KeyError, TypeError, ValueError):
+            continue
+        km = (ride.get("distance_m") or 0) / 1000
+        for key, first_day in (("today", today), ("week", week_start), ("month", month_start)):
+            if first_day <= day <= today:
+                totals[key]["rides"] += 1
+                totals[key]["km"] += km
+    for total in totals.values():
+        total["km"] = round(total["km"], 1)
+    return totals

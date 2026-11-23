@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import logging
 from threading import Lock
@@ -10,7 +10,10 @@ import requests
 from .const import (
     ACCOUNT_BASE_URL,
     API_BASE_URL,
+    CYCLING_STATISTICS_API_URI,
+    FIRMWARE_API_URI,
     LOGIN_URI,
+    MESSAGE_LIST_API_URI,
     MOTOR_BATTERY_API_URI,
     MOTOR_INDEX_API_URI,
     MOTOINFO_ALL_API_URI,
@@ -26,6 +29,8 @@ REQUEST_TIMEOUT = (10, 30)
 TOKEN_REFRESH_MARGIN = 5 * 60
 TOKEN_REFRESH_FALLBACK = 22 * 60 * 60
 TRACK_DETAIL_RETRY_INTERVAL = 6 * 60 * 60
+# Larger pages make NIU skip parts of the ride history.
+TRACK_PAGE_SIZE = 5
 
 
 class NiuApiError(Exception):
@@ -392,13 +397,90 @@ class NiuApi:
             "User-Agent": f"manager/1.0.0 (identifier);clientIdentifier={client_id}",
         }
 
-    def post_info_track(self, path):
+    def post_info_track(self, path, index: int = 0, pagesize: int = TRACK_PAGE_SIZE):
         return self._authenticated_request(
             "POST",
             path,
             headers=self._track_headers(),
-            json={"index": "0", "pagesize": 10, "sn": self.sn},
+            json={"index": str(index), "pagesize": pagesize, "sn": self.sn},
         )
+
+    def get_tracks(self, index: int = 0, pagesize: int = TRACK_PAGE_SIZE) -> list[dict]:
+        """Return one page of rides, newest first.
+
+        ``index`` is an offset in rides. NIU silently skips stretches of
+        history when paging with large pages, so keep ``pagesize`` small.
+        """
+        return track_items(
+            self.post_info_track(TRACK_LIST_API_URI, index=index, pagesize=pagesize)
+        )
+
+    def _post_json(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        """POST a JSON body with the token repeated in it, as NIU's apps do."""
+        payload = {"sn": self.sn, **(body or {})}
+        self._ensure_access_token()
+        payload["token"] = self.token
+        return self._authenticated_request(
+            "POST", path, headers=self._locale_headers(), json=payload
+        )
+
+    def get_cycling_statistics(self, sortby: int = 3) -> list[dict]:
+        """Ridden kilometres per period: 1 = day, 2 = week, 3 = month."""
+        result = self._authenticated_request(
+            "GET",
+            CYCLING_STATISTICS_API_URI,
+            headers=self._locale_headers(),
+            params={"sn": self.sn, "sortby": str(sortby)},
+        )
+        items = _data_items(result)
+        periods = []
+        for item in items:
+            period = str(item.get("date") or "")
+            start, _, end = period.partition("/")
+            # NIU spells it "everdayMileage".
+            km = _coordinate(item.get("everdayMileage", item.get("everydayMileage")))
+            if len(start) != 8 or km is None:
+                continue
+            periods.append({"start": start, "end": end or start, "km": round(km, 2)})
+        periods.sort(key=lambda period: period["start"])
+        return periods
+
+    def get_firmware(self) -> dict[str, Any] | None:
+        result = self._post_json(FIRMWARE_API_URI)
+        data = result.get("data")
+        return data if isinstance(data, dict) else None
+
+    def get_messages(self) -> list[dict]:
+        """Return NIU's notification feed (alarms, ride summaries, ...)."""
+        return _data_items(self._post_json(MESSAGE_LIST_API_URI))
+
+    def is_charging(self) -> bool | None:
+        """Whether a charger is really connected.
+
+        NIU's ``isCharging`` stays 1 while the ECU's internal battery tops
+        itself up from the main pack, even while riding. ``charging_time``
+        (seconds into the current charge session) only counts while an
+        external charger is connected.
+        """
+        if self.dataMoto is None:
+            return None
+        charging_time = _coordinate(self.getDataMoto("charging_time"))
+        if charging_time is not None:
+            return charging_time > 0
+        left_time = _coordinate(self.getDataMoto("leftTime"))
+        if left_time is not None:
+            return left_time > 0
+        return None
+
+    def getMotoTimestamp(self, id_field: str) -> datetime | None:
+        """A millisecond epoch field of the motor data as an aware datetime."""
+        value = _coordinate(self.getDataMoto(id_field))
+        if not value or value < 0:
+            return None
+        try:
+            return datetime.fromtimestamp(value / 1000, tz=timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            return None
 
     def _detail_header_variants(self) -> list[tuple[str, dict[str, str]]]:
         is_chinese = self.language.startswith("zh")
@@ -496,11 +578,8 @@ class NiuApi:
 
     def getLatestTrack(self) -> dict | None:
         """Return the newest track from the track list, if any."""
-        try:
-            track = self.dataTrackInfo["data"][0]
-        except (IndexError, KeyError, TypeError):
-            return None
-        return track if isinstance(track, dict) else None
+        tracks = track_items(self.dataTrackInfo)
+        return tracks[0] if tracks else None
 
     def getLatestTrackEnds(self) -> tuple[tuple[float, float], tuple[float, float]] | None:
         """Return the (lat, lng) start and end of the newest track."""
@@ -626,6 +705,23 @@ class NiuApi:
         self.track_points = points
         self.track_points_id = track_id
         self._track_detail_failed_id = None
+
+
+def _data_items(payload) -> list[dict]:
+    """The item list of a response whose ``data`` is a list or ``{items: [...]}``."""
+    if not isinstance(payload, dict):
+        return []
+    data = payload.get("data")
+    if isinstance(data, dict):
+        data = data.get("items")
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def track_items(payload) -> list[dict]:
+    """The rides in a /v5/track/list/v2 response, newest first."""
+    return _data_items(payload)
 
 
 def _coordinate(value) -> float | None:

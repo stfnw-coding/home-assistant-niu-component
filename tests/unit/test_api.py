@@ -393,3 +393,80 @@ class NiuApiTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NiuApiExtrasTest(unittest.TestCase):
+    """Charging state, timestamps and the extra endpoints."""
+
+    def setUp(self) -> None:
+        api_module.requests.get.reset_mock(return_value=True, side_effect=True)
+        api_module.requests.post.reset_mock(return_value=True, side_effect=True)
+        self.api = api_module.NiuApi("user@example.com", "secret", 0)
+        self.api.sn = "TEST-SN"
+        self.api.token = "access"
+        self.api._token_refresh_at = float("inf")
+
+    def test_sticky_is_charging_flag_is_ignored(self) -> None:
+        self.api.dataMoto = {"data": {"isCharging": 1, "charging_time": "0", "leftTime": 0}}
+        self.assertIs(self.api.is_charging(), False)
+
+    def test_charging_time_means_a_charger_is_connected(self) -> None:
+        self.api.dataMoto = {"data": {"isCharging": 1, "charging_time": "1260"}}
+        self.assertIs(self.api.is_charging(), True)
+
+    def test_left_time_is_the_fallback(self) -> None:
+        self.api.dataMoto = {"data": {"isCharging": 1, "leftTime": 1.5}}
+        self.assertIs(self.api.is_charging(), True)
+        self.api.dataMoto = {"data": {"isCharging": 1}}
+        self.assertIsNone(self.api.is_charging())
+
+    def test_millisecond_timestamps(self) -> None:
+        self.api.dataMoto = {"data": {"gpsTimestamp": 1795297702000, "infoTimestamp": 0}}
+        stamp = self.api.getMotoTimestamp("gpsTimestamp")
+        self.assertEqual(stamp.isoformat(), "2026-11-21T21:48:22+00:00")
+        self.assertIsNone(self.api.getMotoTimestamp("infoTimestamp"))
+        self.assertIsNone(self.api.getMotoTimestamp("missing"))
+
+    def test_cycling_statistics_are_parsed_and_sorted(self) -> None:
+        api_module.requests.get.return_value = FakeResponse(
+            200,
+            {
+                "status": 0,
+                "data": {
+                    "items": [
+                        {"date": "20261101/20261130", "everdayMileage": "80.25"},
+                        {"date": "20261001/20261031", "everdayMileage": 120.5},
+                        {"date": "bad", "everdayMileage": 1},
+                    ]
+                },
+            },
+        )
+        months = self.api.get_cycling_statistics(3)
+        self.assertEqual(
+            months,
+            [
+                {"start": "20261001", "end": "20261031", "km": 120.5},
+                {"start": "20261101", "end": "20261130", "km": 80.25},
+            ],
+        )
+        self.assertEqual(
+            api_module.requests.get.call_args.kwargs["params"],
+            {"sn": "TEST-SN", "sortby": "3"},
+        )
+
+    def test_track_pages_use_small_pages_and_offsets(self) -> None:
+        api_module.requests.post.return_value = FakeResponse(
+            200, {"status": 0, "data": {"items": [{"trackId": "A"}], "track_mileage": []}}
+        )
+        tracks = self.api.get_tracks(10)
+        self.assertEqual(tracks, [{"trackId": "A"}])
+        body = api_module.requests.post.call_args.kwargs["json"]
+        self.assertEqual(body, {"index": "10", "pagesize": 5, "sn": "TEST-SN"})
+
+    def test_messages_post_json_with_token(self) -> None:
+        api_module.requests.post.return_value = FakeResponse(
+            200, {"status": 0, "data": {"items": [{"msgId": "1", "title": "Alarm"}]}}
+        )
+        self.assertEqual(self.api.get_messages(), [{"msgId": "1", "title": "Alarm"}])
+        body = api_module.requests.post.call_args.kwargs["json"]
+        self.assertEqual(body, {"sn": "TEST-SN", "token": "access"})

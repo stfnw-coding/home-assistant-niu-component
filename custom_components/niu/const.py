@@ -7,6 +7,9 @@ MOTOINFO_LIST_API_URI = "/v5/scooter/list"
 MOTOINFO_ALL_API_URI = "/motoinfo/overallTally"
 TRACK_LIST_API_URI = "/v5/track/list/v2"
 TRACK_DETAIL_API_URI = "/v5/track/detail"
+CYCLING_STATISTICS_API_URI = "/v3/motor_data/cycling_statistics"
+FIRMWARE_API_URI = "/motorota/getfirmwareversion"
+MESSAGE_LIST_API_URI = "/v3/msg/card_lists"
 # FIRMWARE_BAS_URL = '/motorota/getfirmwareversion'
 
 DOMAIN = "niu"
@@ -24,6 +27,7 @@ MAP_STYLES = [MAP_STYLE_DARK, MAP_STYLE_OSM]
 DEFAULT_MAP_STYLE = MAP_STYLE_DARK
 
 SIGNAL_NEW_BATTERY = "niu_new_battery_{}"
+EVENT_NIU_MESSAGE = "niu_message"
 
 DEFAULT_SCOOTER_ID = 0
 
