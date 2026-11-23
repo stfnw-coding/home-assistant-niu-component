@@ -1,7 +1,7 @@
 // niu-rides-card: rittenlog van de NIU-integratie, per dag gegroepeerd, elke rit klapt uit met kaart.
 // Data komt uit de websocket-opdracht "niu/rides" van de integratie.
 
-const CARD_VERSION = "1.1.0";
+const CARD_VERSION = "1.1.1";
 
 const esc = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -102,7 +102,14 @@ class NiuRidesCard extends HTMLElement {
       this._loadedOnce = true;
     } finally {
       this._loading = false;
+      const firstData = !this._announcedLayout && this._loadedOnce;
       this._render();
+      if (firstData) {
+        // The card grows once the rides arrive; cards that size themselves
+        // only on window resize (such as charts) would keep a stale width.
+        this._announcedLayout = true;
+        requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+      }
     }
   }
 
