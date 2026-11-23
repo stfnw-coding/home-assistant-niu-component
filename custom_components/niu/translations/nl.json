@@ -102,6 +102,9 @@
             },
             "last_message": {
                 "name": "Laatste NIU-melding"
+            },
+            "range_full_charge": {
+                "name": "Bereik per volle accu"
             }
         },
         "camera": {

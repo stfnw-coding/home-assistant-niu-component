@@ -10,6 +10,8 @@ import requests
 from .const import (
     ACCOUNT_BASE_URL,
     API_BASE_URL,
+    BATTERY_CHART_API_URI,
+    BATTERY_HEALTH_API_URI,
     CYCLING_STATISTICS_API_URI,
     FIRMWARE_API_URI,
     LOGIN_URI,
@@ -444,6 +446,56 @@ class NiuApi:
             periods.append({"start": start, "end": end or start, "km": round(km, 2)})
         periods.sort(key=lambda period: period["start"])
         return periods
+
+    def get_battery_health(self) -> dict[str, dict]:
+        """Health report per battery compartment: grade history and faults."""
+        result = self._authenticated_request(
+            "GET",
+            BATTERY_HEALTH_API_URI,
+            headers=self._locale_headers(),
+            params={"sn": self.sn},
+        )
+        try:
+            batteries = result["data"]["batteries"]
+        except (KeyError, TypeError):
+            return {}
+        if not isinstance(batteries, dict):
+            return {}
+        return {
+            name: value for name, value in batteries.items() if isinstance(value, dict)
+        }
+
+    def get_battery_chart(self, battery: int = 1, page: int = 1) -> list[dict]:
+        """Charge against distance for a battery (1 = compartment A).
+
+        Returns points ``{"km": ..., "pct": ...}`` as NIU sends them
+        (``m`` = kilometres, ``b`` = state of charge).
+        """
+        result = self._authenticated_request(
+            "GET",
+            BATTERY_CHART_API_URI,
+            headers=self._locale_headers(),
+            params={
+                "sn": self.sn,
+                "bmsId": str(battery),
+                "page": str(page),
+                "page_size": "B",
+                "pageLength": "1",
+            },
+        )
+        data = result.get("data") if isinstance(result, dict) else None
+        items = data.get("items1") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            return []
+        points = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            km, pct = _coordinate(item.get("m")), _coordinate(item.get("b"))
+            if km is None or pct is None:
+                continue
+            points.append({"km": km, "pct": pct})
+        return points
 
     def get_firmware(self) -> dict[str, Any] | None:
         result = self._post_json(FIRMWARE_API_URI)

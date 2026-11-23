@@ -126,6 +126,28 @@ def _messages(self):
     return list(MESSAGES)
 
 
+def _health(self):
+    return {
+        "compartmentA": {
+            "bmsId": "BN1GPC2B41800226",
+            "gradeBattery": "68",
+            "faults": [],
+            "healthRecords": [
+                {"result": "2", "chargeCount": "300", "time": 1790000000000, "name": "check"},
+                {"result": "1", "chargeCount": "100", "time": 1700000000000, "name": "check"},
+            ],
+        }
+    }
+
+
+def _chart(self, battery=1, page=1):
+    # 50 % used over 15 km, a charge, then 20 % over 6 km: 30 km per full charge.
+    return [
+        {"km": 100.0, "pct": 90.0}, {"km": 115.0, "pct": 40.0},
+        {"km": 115.0, "pct": 95.0}, {"km": 121.0, "pct": 75.0},
+    ]
+
+
 def _detail(self, track_id, date):
     return {
         "data": {
@@ -197,6 +219,8 @@ async def test_full_setup(hass: HomeAssistant, hass_ws_client) -> None:
         patch(f"{api}.get_cycling_statistics", _cycling),
         patch(f"{api}.get_firmware", _firmware),
         patch(f"{api}.get_messages", _messages),
+        patch(f"{api}.get_battery_health", _health),
+        patch(f"{api}.get_battery_chart", _chart),
         patch("custom_components.niu.camera.get_async_client", return_value=client),
         patch("custom_components.niu.ride_maps.get_async_client", return_value=client),
         patch("custom_components.niu.ride_maps.asyncio.sleep", _no_sleep),
@@ -239,6 +263,9 @@ async def test_full_setup(hass: HomeAssistant, hass_ws_client) -> None:
             "update_beschikbaar"
         ] is True
         assert hass.states.get(by_unique["niu_scooter_SN123_last_message"]).state == "Rit voltooid"
+        assert hass.states.get(by_unique["niu_scooter_SN123_range_full_charge"]).state == "30.0"
+        health = hass.states.get(by_unique["niu_scooter_SN123_battery_BN1GPC2B41800226_health"])
+        assert [entry["cycles"] for entry in health.attributes["history"]] == [100, 300]
         print("new entities:", sorted(v for k, v in by_unique.items() if k.startswith("niu_scooter_SN123_")))
 
         # The ride log read the newest ride plus the older history.

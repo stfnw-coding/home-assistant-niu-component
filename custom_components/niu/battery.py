@@ -110,7 +110,55 @@ class BatteryRegistry:
 
         return new_ids, changed or bool(new_ids)
 
+    def process_health(self, compartments: dict[str, dict[str, Any]]) -> bool:
+        """Keep NIU's health report (grade history, faults) per battery."""
+        changed = False
+        for compartment in compartments.values():
+            bms_id = compartment.get("bmsId")
+            if not bms_id or str(bms_id) not in self.batteries:
+                continue
+            record = self.batteries[str(bms_id)]
+            history = []
+            for item in compartment.get("healthRecords") or []:
+                if not isinstance(item, dict):
+                    continue
+                history.append(
+                    {
+                        "time": _number(item.get("time")),
+                        "name": item.get("name"),
+                        "lost": _number(item.get("result")),
+                        "cycles": _number(item.get("chargeCount")),
+                    }
+                )
+            history.sort(key=lambda entry: entry["time"] or 0)
+            faults = [
+                fault for fault in compartment.get("faults") or [] if isinstance(fault, dict)
+            ]
+            for key, value in (("health_history", history), ("faults", faults)):
+                if record.get(key) != value:
+                    record[key] = value
+                    changed = True
+        return changed
+
     def installed_label(self) -> str | None:
         if not self.installed:
             return None
         return ", ".join(sorted(battery_label(bms_id) for bms_id in self.installed))
+
+
+def range_per_full_charge(points: list[dict]) -> float | None:
+    """Kilometres per 100 % of charge, from the drops in NIU's battery chart.
+
+    Only steps where the charge went down while the distance went up count,
+    so charging sessions in between do not disturb the result.
+    """
+    distance = used = 0.0
+    for first, second in zip(points, points[1:]):
+        km = second["km"] - first["km"]
+        pct = first["pct"] - second["pct"]
+        if km > 0 and pct > 0:
+            distance += km
+            used += pct
+    if used < 10:
+        return None
+    return round(distance / used * 100, 1)

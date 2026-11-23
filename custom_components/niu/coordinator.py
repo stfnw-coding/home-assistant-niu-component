@@ -42,6 +42,8 @@ RIDES_SAVE_DELAY = 30
 MILEAGE_INTERVAL = 60 * 60
 FIRMWARE_INTERVAL = 12 * 60 * 60
 MESSAGES_INTERVAL = 5 * 60
+BATTERY_HEALTH_INTERVAL = 6 * 60 * 60
+BATTERY_CHART_INTERVAL = 60 * 60
 
 
 def required_sensor_groups(sensors_selected: list[str]) -> set[str]:
@@ -89,6 +91,8 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
         self.mileage_days: list[dict] | None = None
         self.firmware: dict | None = None
         self.messages: list[dict] | None = None
+        self.battery_chart: list[dict] | None = None
+        self._battery_health: dict | None = None
         self._next_fetch: dict[str, float] = {}
         self._new_messages: list[dict] = []
 
@@ -152,6 +156,8 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
             ("mileage", MILEAGE_INTERVAL, self._fetch_mileage),
             ("firmware", FIRMWARE_INTERVAL, self._fetch_firmware),
             ("messages", MESSAGES_INTERVAL, self._fetch_messages),
+            ("battery health", BATTERY_HEALTH_INTERVAL, self._fetch_battery_health),
+            ("battery chart", BATTERY_CHART_INTERVAL, self._fetch_battery_chart),
         )
         for name, interval, fetch in fetchers:
             if not self._due(name, interval):
@@ -168,6 +174,12 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
     def _fetch_mileage(self) -> None:
         self.mileage_months = self.api.get_cycling_statistics(3)
         self.mileage_days = self.api.get_cycling_statistics(1)
+
+    def _fetch_battery_health(self) -> None:
+        self._battery_health = self.api.get_battery_health()
+
+    def _fetch_battery_chart(self) -> None:
+        self.battery_chart = self.api.get_battery_chart(1)
 
     def _fetch_firmware(self) -> None:
         self.firmware = self.api.get_firmware()
@@ -186,6 +198,9 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
         if not self.sensor_groups & {SENSOR_TYPE_BAT, SENSOR_TYPE_BAT2}:
             return
         new_ids, changed = self.batteries.process(api.getBatteryCompartments())
+        if self._battery_health is not None:
+            changed |= self.batteries.process_health(self._battery_health)
+            self._battery_health = None
         if changed and self._battery_store is not None:
             self._battery_store.async_delay_save(
                 self.batteries.as_dict, BATTERY_SAVE_DELAY

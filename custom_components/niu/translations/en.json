@@ -103,6 +103,9 @@
             },
             "last_message": {
                 "name": "Last NIU message"
+            },
+            "range_full_charge": {
+                "name": "Range on a full charge"
             }
         },
         "camera": {

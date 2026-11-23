@@ -39,6 +39,12 @@ class FakeApi:
     def get_messages(self) -> list:
         return []
 
+    def get_battery_health(self) -> dict:
+        return {}
+
+    def get_battery_chart(self, battery=1, page=1) -> list:
+        return []
+
     def initialize(self) -> None:
         self.calls.append("initialize")
 

@@ -10,6 +10,8 @@ TRACK_DETAIL_API_URI = "/v5/track/detail"
 CYCLING_STATISTICS_API_URI = "/v3/motor_data/cycling_statistics"
 FIRMWARE_API_URI = "/motorota/getfirmwareversion"
 MESSAGE_LIST_API_URI = "/v3/msg/card_lists"
+BATTERY_HEALTH_API_URI = "/v3/motor_data/battery_info/health"
+BATTERY_CHART_API_URI = "/v3/motor_data/battery_chart/"
 # FIRMWARE_BAS_URL = '/motorota/getfirmwareversion'
 
 DOMAIN = "niu"

@@ -17,7 +17,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.util import dt as dt_util
 
-from .battery import battery_label, compartment_is_present
+from .battery import battery_label, compartment_is_present, range_per_full_charge
 from .const import (
     CONF_AUTH,
     CONF_SENSORS,
@@ -243,6 +243,7 @@ class NiuBatterySensor(NiuCoordinatorEntity, SensorEntity):
     """Last known value of one battery, whether it is in the scooter or not."""
 
     _attr_has_entity_name = True
+    _unrecorded_attributes = frozenset({"history", "faults"})
 
     def __init__(
         self, coordinator: NiuDataUpdateCoordinator, bms_id: str, kind: str
@@ -280,13 +281,17 @@ class NiuBatterySensor(NiuCoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         record = self._record
-        return {
+        attributes = {
             "bms_id": self._bms_id,
             "in_scooter": self._bms_id in self.coordinator.batteries.installed,
             "last_seen": record.get("last_seen"),
             "last_installed": record.get("last_installed"),
             "temperature": record.get("temperature"),
         }
+        if self._kind == "health":
+            attributes["history"] = record.get("health_history") or []
+            attributes["faults"] = record.get("faults") or []
+        return attributes
 
 
 # ---------------------------------------------------------------- extras
@@ -377,6 +382,18 @@ def _rides_attr(coordinator) -> dict:
         "geschiedenis_inlezen": coordinator.rides.backfilling,
         "recent": [public_ride(ride) for ride in rides[:5]],
     }
+
+
+def _range_value(coordinator):
+    if not coordinator.battery_chart:
+        return None
+    return range_per_full_charge(coordinator.battery_chart)
+
+
+def _range_attr(coordinator) -> dict | None:
+    if coordinator.battery_chart is None:
+        return None
+    return {"punten": coordinator.battery_chart[-300:]}
 
 
 def _firmware_value(coordinator):
@@ -496,6 +513,16 @@ EXTRA_SENSORS: tuple[NiuExtraDescription, ...] = (
         precision=0,
     ),
     NiuExtraDescription(
+        key="range_full_charge",
+        value=_range_value,
+        attributes=_range_attr,
+        unit=UnitOfLength.KILOMETERS,
+        device_class=SensorDeviceClass.DISTANCE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:battery-arrow-up-outline",
+        precision=0,
+    ),
+    NiuExtraDescription(
         key="firmware",
         value=_firmware_value,
         attributes=_firmware_attr,
@@ -516,7 +543,7 @@ class NiuExtraSensor(NiuCoordinatorEntity, SensorEntity):
 
     _attr_has_entity_name = True
     # Large, often-changing lists the recorder does not need to keep.
-    _unrecorded_attributes = frozenset({"recent", "dagen", "maanden"})
+    _unrecorded_attributes = frozenset({"recent", "dagen", "maanden", "punten"})
 
     def __init__(
         self, coordinator: NiuDataUpdateCoordinator, description: NiuExtraDescription

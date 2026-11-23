@@ -321,3 +321,47 @@ class ThumbnailTraceTest(unittest.TestCase):
             self._thumbnail((320, 200), (80, 210)), (52.40, 4.92), (52.38, 4.92)
         )
         self.assertIsNone(segments)
+
+
+class BatteryHealthTest(unittest.TestCase):
+    """NIU's health report and the range estimate."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        sys.path.insert(0, str(REPOSITORY_ROOT))
+
+    def setUp(self) -> None:
+        install_homeassistant_stubs()
+        clear_niu_modules()
+
+    def test_health_history_is_kept_per_battery(self) -> None:
+        battery = importlib.import_module("custom_components.niu.battery")
+        registry = battery.BatteryRegistry({"batteries": {"BMS1": {"health": 70}}})
+        report = {
+            "compartmentA": {
+                "bmsId": "BMS1",
+                "faults": [{"code": 1}],
+                "healthRecords": [
+                    {"result": "3", "chargeCount": "250", "time": 20, "name": "b"},
+                    {"result": "1", "chargeCount": "100", "time": 10, "name": "a"},
+                ],
+            },
+            "compartmentB": {"bmsId": "UNKNOWN", "healthRecords": []},
+        }
+        self.assertTrue(registry.process_health(report))
+        record = registry.batteries["BMS1"]
+        self.assertEqual([entry["cycles"] for entry in record["health_history"]], [100, 250])
+        self.assertEqual(record["faults"], [{"code": 1}])
+        self.assertNotIn("UNKNOWN", registry.batteries)
+        self.assertFalse(registry.process_health(report))
+
+    def test_range_counts_only_discharge_steps(self) -> None:
+        battery = importlib.import_module("custom_components.niu.battery")
+        points = [
+            {"km": 100.0, "pct": 90.0},
+            {"km": 115.0, "pct": 40.0},
+            {"km": 115.0, "pct": 95.0},
+            {"km": 121.0, "pct": 75.0},
+        ]
+        self.assertEqual(battery.range_per_full_charge(points), 30.0)
+        self.assertIsNone(battery.range_per_full_charge(points[:1]))
