@@ -84,7 +84,7 @@ class RideLogTest(unittest.TestCase):
         log = rides.RideLog()
         self.assertTrue(log.backfilling)
         log.backfill_page([track(str(i), NOW) for i in range(5)], 5, NOW)
-        self.assertEqual(log.backfill_index, 5)
+        self.assertEqual(log.backfill_index, 1)
         log.backfill_page([track("x", NOW)], 5, NOW)
         self.assertTrue(log.backfilling)
         self.assertEqual([entry["count"] for entry in log.backfill_trace], [5, 1])
@@ -104,9 +104,13 @@ class RideLogTest(unittest.TestCase):
         log.backfill_page([track(str(i), old) for i in range(5)], 5, NOW)
         self.assertFalse(log.backfilling)
 
-    def test_logs_from_2_3_0_read_the_history_again(self) -> None:
+    def test_logs_paged_by_offset_read_the_history_again(self) -> None:
         restored = rides.RideLog({"rides": [], "salt": "x", "backfill_index": None})
         self.assertTrue(restored.backfilling)
+        log = rides.RideLog()
+        log.backfill_page([], 5, NOW)
+        log.backfill_page([], 5, NOW)
+        self.assertFalse(rides.RideLog(log.as_dict()).backfilling)
 
     def test_restart_backfill(self) -> None:
         log = rides.RideLog()

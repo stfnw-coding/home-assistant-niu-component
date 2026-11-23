@@ -101,9 +101,9 @@ OLDER_RIDES = [
 ]
 
 
-def _get_tracks(self, index=0, pagesize=5):
+def _get_tracks(self, page=0, pagesize=5):
     rides = [*self.dataTrackInfo["data"], *OLDER_RIDES]
-    return rides[index : index + pagesize]
+    return rides[page * pagesize : (page + 1) * pagesize]
 
 
 def _cycling(self, sortby=3):

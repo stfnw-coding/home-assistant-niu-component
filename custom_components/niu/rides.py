@@ -13,6 +13,8 @@ STORAGE_VERSION = 1
 MAX_RIDES = 1000
 # How far back the first backfill reads the ride history.
 BACKFILL_DAYS = 120
+# NIU's ride list is paged: "index" is the page number, not an offset.
+BACKFILL_MODE = "page"
 # Ride-list pages read per backfill step (one step per polling cycle).
 BACKFILL_PAGES_PER_STEP = 4
 BACKFILL_MAX_PAGES = 120
@@ -105,8 +107,8 @@ class RideLog:
         self.backfill_index: int | None = data.get("backfill_index", 0)
         self.backfill_empty: int = data.get("backfill_empty", 0)
         self.backfill_trace: list[dict] = list(data.get("backfill_trace") or [])
-        if data and "backfill_trace" not in data:
-            # Logs from 2.3.0 stopped reading the history too early.
+        if data and data.get("backfill_mode") != BACKFILL_MODE:
+            # Earlier logs paged through the history wrongly and missed rides.
             self.restart_backfill()
         self.places: dict[str, str] = dict(data.get("places") or {})
 
@@ -117,6 +119,7 @@ class RideLog:
             "backfill_index": self.backfill_index,
             "backfill_empty": self.backfill_empty,
             "backfill_trace": self.backfill_trace,
+            "backfill_mode": BACKFILL_MODE,
             "places": self.places,
         }
 
@@ -185,14 +188,14 @@ class RideLog:
         """
         assert self.backfill_index is not None
         index = self.backfill_index
-        self.backfill_index += page_size
+        self.backfill_index += 1
         starts = [
             _number(track.get("startTime")) for track in tracks if isinstance(track, dict)
         ]
         starts = [start for start in starts if start is not None]
         self.backfill_trace.append(
             {
-                "index": index,
+                "page": index,
                 "count": len(tracks),
                 "newest": _iso(max(starts)) if starts else None,
                 "oldest": _iso(min(starts)) if starts else None,
@@ -204,7 +207,7 @@ class RideLog:
         if (
             self.backfill_empty >= 2
             or (starts and max(starts) / 1000 < oldest_wanted.timestamp())
-            or self.backfill_index >= BACKFILL_MAX_PAGES * page_size
+            or self.backfill_index >= BACKFILL_MAX_PAGES
         ):
             self.backfill_index = None
 

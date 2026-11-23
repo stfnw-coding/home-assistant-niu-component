@@ -148,24 +148,40 @@ class BatteryRegistry:
 
 # More than this per kilometre is not riding but a battery swap.
 MAX_PCT_PER_KM = 8
+MIN_RUN_STEPS = 3
 
 
 def range_per_full_charge(points: list[dict]) -> float | None:
-    """Kilometres per 100 % of charge, from the drops in NIU's battery chart.
+    """Kilometres per 100 % of charge, from NIU's battery chart.
 
-    Only steps where the charge went down while the distance went up count,
-    so charging sessions in between do not disturb the result.
+    NIU samples the charge about once per kilometre for whichever battery is
+    in the compartment, and mixes in stale readings, so the chart jumps
+    around with swaps and charges. Only clean stretches count: at least
+    ``MIN_RUN_STEPS`` steps in a row of one to three kilometres, each using
+    a plausible amount of charge.
     """
     distance = used = 0.0
+    run_km = run_pct = 0.0
+    run_steps = 0
+
+    def close_run() -> None:
+        nonlocal distance, used, run_km, run_pct, run_steps
+        if run_steps >= MIN_RUN_STEPS:
+            distance += run_km
+            used += run_pct
+        run_km = run_pct = 0.0
+        run_steps = 0
+
     for first, second in zip(points, points[1:]):
         km = second["km"] - first["km"]
         pct = first["pct"] - second["pct"]
-        # A step of a few kilometres that used a plausible amount of charge.
-        # Bigger jumps are a charge or a swap to the other battery: NIU
-        # charts whichever battery sits in the compartment.
-        if 0 < km <= 3 and 0 <= pct <= MAX_PCT_PER_KM * km:
-            distance += km
-            used += pct
+        if 0 < km <= 3 and 0 < pct <= MAX_PCT_PER_KM * km:
+            run_km += km
+            run_pct += pct
+            run_steps += 1
+        else:
+            close_run()
+    close_run()
     if used < 10:
         return None
     return round(distance / used * 100, 1)

@@ -454,14 +454,14 @@ class NiuApiExtrasTest(unittest.TestCase):
             {"sn": "TEST-SN", "sortby": "3"},
         )
 
-    def test_track_pages_use_small_pages_and_offsets(self) -> None:
+    def test_track_pages_are_numbered(self) -> None:
         api_module.requests.post.return_value = FakeResponse(
             200, {"status": 0, "data": {"items": [{"trackId": "A"}], "track_mileage": []}}
         )
-        tracks = self.api.get_tracks(10)
+        tracks = self.api.get_tracks(2)
         self.assertEqual(tracks, [{"trackId": "A"}])
         body = api_module.requests.post.call_args.kwargs["json"]
-        self.assertEqual(body, {"index": "10", "pagesize": 5, "sn": "TEST-SN", "token": "access"})
+        self.assertEqual(body, {"index": "2", "pagesize": 5, "sn": "TEST-SN", "token": "access"})
 
     def test_messages_post_json_with_token(self) -> None:
         api_module.requests.post.return_value = FakeResponse(

@@ -364,16 +364,11 @@ class BatteryHealthTest(unittest.TestCase):
             {"km": 121.0, "pct": 75.0},
         ]
         self.assertIsNone(battery.range_per_full_charge(points))
-        # NIU's real chart: a sample per km, with swaps to the other battery.
-        real = [
-            {"km": 20438.0, "pct": 74.0}, {"km": 20439.0, "pct": 71.0},
-            {"km": 20440.0, "pct": 89.0}, {"km": 20441.0, "pct": 91.0},
-            {"km": 20443.0, "pct": 54.0}, {"km": 20444.0, "pct": 50.0},
-            {"km": 20445.0, "pct": 47.0}, {"km": 20446.0, "pct": 44.0},
-            {"km": 20525.0, "pct": 86.0}, {"km": 20526.0, "pct": 83.0},
-            {"km": 20527.0, "pct": 81.0}, {"km": 20528.0, "pct": 78.0},
-            {"km": 20529.0, "pct": 76.0}, {"km": 20530.0, "pct": 74.0},
-            {"km": 20531.0, "pct": 72.0}, {"km": 20532.0, "pct": 69.0},
-            {"km": 20533.0, "pct": 69.0}, {"km": 20534.0, "pct": 65.0},
-        ]
-        self.assertEqual(battery.range_per_full_charge(real), 38.2)
+        # NIU's real chart (23 Nov 2026): stale 91 % readings and swaps in
+        # between; only the clean stretches count.
+        pct = [74,71,89,91,91,54,50,47,44,89,89,89,91,89,26,91,89,18,91,91,78,91,91,72,
+               91,91,91,91,91,91,82,91,91,91,91,70,91,91,91,91,54,91,48,91,91,91,91,91,
+               30,91,26,91,21,91,91,77,91,73,71,91,65,63,60,91,91,91,47,91,91,40,91,91,
+               91,91,91,91,65,62,58,91,51,91,46,33,30,27,90,86,83,81,78,76,74,72,69,69,65]
+        real = [{"km": 20438.0 + i, "pct": float(p)} for i, p in enumerate(pct)]
+        self.assertEqual(battery.range_per_full_charge(real), 35.5)

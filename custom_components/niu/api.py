@@ -413,14 +413,14 @@ class NiuApi:
             },
         )
 
-    def get_tracks(self, index: int = 0, pagesize: int = TRACK_PAGE_SIZE) -> list[dict]:
+    def get_tracks(self, page: int = 0, pagesize: int = TRACK_PAGE_SIZE) -> list[dict]:
         """Return one page of rides, newest first.
 
-        ``index`` is an offset in rides. NIU silently skips stretches of
-        history when paging with large pages, so keep ``pagesize`` small.
+        NIU's ``index`` is the page number (0 = newest rides), not an offset
+        in rides: offsets skip whole stretches of the history.
         """
         return track_items(
-            self.post_info_track(TRACK_LIST_API_URI, index=index, pagesize=pagesize)
+            self.post_info_track(TRACK_LIST_API_URI, index=page, pagesize=pagesize)
         )
 
     def _post_json(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
