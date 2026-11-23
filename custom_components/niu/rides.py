@@ -105,6 +105,9 @@ class RideLog:
         self.backfill_index: int | None = data.get("backfill_index", 0)
         self.backfill_empty: int = data.get("backfill_empty", 0)
         self.backfill_trace: list[dict] = list(data.get("backfill_trace") or [])
+        if data and "backfill_trace" not in data:
+            # Logs from 2.3.0 stopped reading the history too early.
+            self.restart_backfill()
         self.places: dict[str, str] = dict(data.get("places") or {})
 
     def as_dict(self) -> dict:

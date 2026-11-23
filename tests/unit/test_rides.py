@@ -104,6 +104,10 @@ class RideLogTest(unittest.TestCase):
         log.backfill_page([track(str(i), old) for i in range(5)], 5, NOW)
         self.assertFalse(log.backfilling)
 
+    def test_logs_from_2_3_0_read_the_history_again(self) -> None:
+        restored = rides.RideLog({"rides": [], "salt": "x", "backfill_index": None})
+        self.assertTrue(restored.backfilling)
+
     def test_restart_backfill(self) -> None:
         log = rides.RideLog()
         log.backfill_page([], 5, NOW)
