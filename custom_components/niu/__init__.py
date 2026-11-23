@@ -6,7 +6,7 @@ from pathlib import Path
 
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.storage import Store
 
 from .api import NiuApi
@@ -41,7 +41,19 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})
     await _async_register_frontend(hass)
     async_register_websocket_commands(hass)
+    _register_services(hass)
     return True
+
+
+def _register_services(hass: HomeAssistant) -> None:
+    async def reread_ride_history(call: ServiceCall) -> None:
+        for key, coordinator in hass.data.get(DOMAIN, {}).items():
+            if key.startswith("_"):
+                continue
+            coordinator.rides.restart_backfill()
+            await coordinator.async_request_refresh()
+
+    hass.services.async_register(DOMAIN, "reread_ride_history", reread_ride_history)
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:

@@ -404,7 +404,13 @@ class NiuApi:
             "POST",
             path,
             headers=self._track_headers(),
-            json={"index": str(index), "pagesize": pagesize, "sn": self.sn},
+            json={
+                "index": str(index),
+                "pagesize": pagesize,
+                "sn": self.sn,
+                # NIU's own apps repeat the token in the body.
+                "token": self.token,
+            },
         )
 
     def get_tracks(self, index: int = 0, pagesize: int = TRACK_PAGE_SIZE) -> list[dict]:

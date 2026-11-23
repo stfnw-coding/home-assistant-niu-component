@@ -103,6 +103,8 @@ class RideLog:
         )
         self.salt: str = data.get("salt") or secrets.token_hex(8)
         self.backfill_index: int | None = data.get("backfill_index", 0)
+        self.backfill_empty: int = data.get("backfill_empty", 0)
+        self.backfill_trace: list[dict] = list(data.get("backfill_trace") or [])
         self.places: dict[str, str] = dict(data.get("places") or {})
 
     def as_dict(self) -> dict:
@@ -110,6 +112,8 @@ class RideLog:
             "rides": self.ordered(),
             "salt": self.salt,
             "backfill_index": self.backfill_index,
+            "backfill_empty": self.backfill_empty,
+            "backfill_trace": self.backfill_trace,
             "places": self.places,
         }
 
@@ -168,21 +172,44 @@ class RideLog:
         return self.backfill_index is not None
 
     def backfill_page(self, tracks: list[dict], page_size: int, now: datetime) -> None:
-        """Account for one page of older rides read during the backfill."""
+        """Account for one page of older rides read during the backfill.
+
+        The backfill stops after two empty pages in a row (the end of the
+        history), once a whole page is older than ``BACKFILL_DAYS``, or after
+        ``BACKFILL_MAX_PAGES``. A short page alone does not stop it: NIU
+        sometimes returns fewer rides than asked for in the middle of the
+        history.
+        """
         assert self.backfill_index is not None
+        index = self.backfill_index
         self.backfill_index += page_size
-        oldest_wanted = now - timedelta(days=BACKFILL_DAYS)
         starts = [
             _number(track.get("startTime")) for track in tracks if isinstance(track, dict)
         ]
         starts = [start for start in starts if start is not None]
+        self.backfill_trace.append(
+            {
+                "index": index,
+                "count": len(tracks),
+                "newest": _iso(max(starts)) if starts else None,
+                "oldest": _iso(min(starts)) if starts else None,
+            }
+        )
+        del self.backfill_trace[:-60]
+        self.backfill_empty = 0 if tracks else self.backfill_empty + 1
+        oldest_wanted = now - timedelta(days=BACKFILL_DAYS)
         if (
-            len(tracks) < page_size
-            or not starts
-            or min(starts) / 1000 < oldest_wanted.timestamp()
+            self.backfill_empty >= 2
+            or (starts and max(starts) / 1000 < oldest_wanted.timestamp())
             or self.backfill_index >= BACKFILL_MAX_PAGES * page_size
         ):
             self.backfill_index = None
+
+    def restart_backfill(self) -> None:
+        """Read the ride history again from the newest ride."""
+        self.backfill_index = 0
+        self.backfill_empty = 0
+        self.backfill_trace = []
 
 
 def place_key(point: list[float]) -> str:

@@ -124,5 +124,11 @@
             }
         }
     },
-    "title": "NIU"
+    "title": "NIU",
+    "services": {
+        "reread_ride_history": {
+            "name": "Rittengeschiedenis opnieuw inlezen",
+            "description": "Leest de ritten opnieuw bij NIU in, vanaf de nieuwste rit. Ritten die al in het log staan houden hun kaart en plaatsnamen."
+        }
+    }
 }

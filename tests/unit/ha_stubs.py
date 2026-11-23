@@ -190,6 +190,7 @@ def install_homeassistant_stubs() -> None:
     core = types.ModuleType("homeassistant.core")
     core.HomeAssistant = type("HomeAssistant", (), {})
     core.callback = lambda func: func
+    core.ServiceCall = type("ServiceCall", (), {})
     storage = types.ModuleType("homeassistant.helpers.storage")
     storage.Store = Store
     dispatcher = types.ModuleType("homeassistant.helpers.dispatcher")

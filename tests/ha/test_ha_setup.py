@@ -141,10 +141,11 @@ def _health(self):
 
 
 def _chart(self, battery=1, page=1):
-    # 50 % used over 15 km, a charge, then 20 % over 6 km: 30 km per full charge.
+    # 3 % per km, with a charge in between: 33.3 km per full charge.
     return [
-        {"km": 100.0, "pct": 90.0}, {"km": 115.0, "pct": 40.0},
-        {"km": 115.0, "pct": 95.0}, {"km": 121.0, "pct": 75.0},
+        {"km": 100.0 + i, "pct": 90.0 - 3 * i} for i in range(6)
+    ] + [{"km": 106.0, "pct": 95.0}] + [
+        {"km": 107.0 + i, "pct": 92.0 - 3 * i} for i in range(4)
     ]
 
 
@@ -263,7 +264,7 @@ async def test_full_setup(hass: HomeAssistant, hass_ws_client) -> None:
             "update_beschikbaar"
         ] is True
         assert hass.states.get(by_unique["niu_scooter_SN123_last_message"]).state == "Rit voltooid"
-        assert hass.states.get(by_unique["niu_scooter_SN123_range_full_charge"]).state == "30.0"
+        assert hass.states.get(by_unique["niu_scooter_SN123_range_full_charge"]).state == "33.3"
         health = hass.states.get(by_unique["niu_scooter_SN123_battery_BN1GPC2B41800226_health"])
         assert [entry["cycles"] for entry in health.attributes["history"]] == [100, 300]
         print("new entities:", sorted(v for k, v in by_unique.items() if k.startswith("niu_scooter_SN123_")))
@@ -271,6 +272,9 @@ async def test_full_setup(hass: HomeAssistant, hass_ws_client) -> None:
         # The ride log read the newest ride plus the older history.
         coordinator = hass.data[DOMAIN][entry.entry_id]
         for _ in range(4):
+            await coordinator.async_refresh()
+            await hass.async_block_till_done()
+        for _ in range(2):
             await coordinator.async_refresh()
             await hass.async_block_till_done()
         assert len(coordinator.rides.rides) == 8

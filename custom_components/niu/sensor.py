@@ -380,6 +380,7 @@ def _rides_attr(coordinator) -> dict:
         "ritten_deze_maand": summary["month"]["rides"],
         "ritten_in_log": len(rides),
         "geschiedenis_inlezen": coordinator.rides.backfilling,
+        "geschiedenis_log": coordinator.rides.backfill_trace[-30:],
         "recent": [public_ride(ride) for ride in rides[:5]],
     }
 
@@ -543,7 +544,9 @@ class NiuExtraSensor(NiuCoordinatorEntity, SensorEntity):
 
     _attr_has_entity_name = True
     # Large, often-changing lists the recorder does not need to keep.
-    _unrecorded_attributes = frozenset({"recent", "dagen", "maanden", "punten"})
+    _unrecorded_attributes = frozenset(
+        {"recent", "dagen", "maanden", "punten", "geschiedenis_log"}
+    )
 
     def __init__(
         self, coordinator: NiuDataUpdateCoordinator, description: NiuExtraDescription

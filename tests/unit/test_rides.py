@@ -80,21 +80,40 @@ class RideLogTest(unittest.TestCase):
         self.assertEqual(restored.map_filename("NEW"), log.map_filename("NEW"))
         self.assertNotIn("NEW", log.map_filename("NEW"))
 
-    def test_backfill_stops_at_a_short_page_or_old_rides(self) -> None:
+    def test_backfill_continues_past_a_short_page(self) -> None:
         log = rides.RideLog()
         self.assertTrue(log.backfilling)
         log.backfill_page([track(str(i), NOW) for i in range(5)], 5, NOW)
         self.assertEqual(log.backfill_index, 5)
         log.backfill_page([track("x", NOW)], 5, NOW)
+        self.assertTrue(log.backfilling)
+        self.assertEqual([entry["count"] for entry in log.backfill_trace], [5, 1])
+
+    def test_backfill_stops_after_two_empty_pages(self) -> None:
+        log = rides.RideLog()
+        log.backfill_page([], 5, NOW)
+        self.assertTrue(log.backfilling)
+        log.backfill_page([], 5, NOW)
         self.assertFalse(log.backfilling)
 
+    def test_backfill_stops_when_a_whole_page_is_too_old(self) -> None:
         log = rides.RideLog()
         old = NOW - timedelta(days=rides.BACKFILL_DAYS + 1)
+        log.backfill_page([track("new", NOW), track("old", old)], 5, NOW)
+        self.assertTrue(log.backfilling)
         log.backfill_page([track(str(i), old) for i in range(5)], 5, NOW)
         self.assertFalse(log.backfilling)
 
+    def test_restart_backfill(self) -> None:
+        log = rides.RideLog()
+        log.backfill_page([], 5, NOW)
+        log.backfill_page([], 5, NOW)
+        log.restart_backfill()
+        self.assertEqual((log.backfill_index, log.backfill_trace), (0, []))
+
     def test_finished_backfill_survives_a_restart(self) -> None:
         log = rides.RideLog()
+        log.backfill_page([], 5, NOW)
         log.backfill_page([], 5, NOW)
         self.assertFalse(rides.RideLog(log.as_dict()).backfilling)
 

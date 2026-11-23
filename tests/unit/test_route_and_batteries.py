@@ -363,5 +363,17 @@ class BatteryHealthTest(unittest.TestCase):
             {"km": 115.0, "pct": 95.0},
             {"km": 121.0, "pct": 75.0},
         ]
-        self.assertEqual(battery.range_per_full_charge(points), 30.0)
-        self.assertIsNone(battery.range_per_full_charge(points[:1]))
+        self.assertIsNone(battery.range_per_full_charge(points))
+        # NIU's real chart: a sample per km, with swaps to the other battery.
+        real = [
+            {"km": 20438.0, "pct": 74.0}, {"km": 20439.0, "pct": 71.0},
+            {"km": 20440.0, "pct": 89.0}, {"km": 20441.0, "pct": 91.0},
+            {"km": 20443.0, "pct": 54.0}, {"km": 20444.0, "pct": 50.0},
+            {"km": 20445.0, "pct": 47.0}, {"km": 20446.0, "pct": 44.0},
+            {"km": 20525.0, "pct": 86.0}, {"km": 20526.0, "pct": 83.0},
+            {"km": 20527.0, "pct": 81.0}, {"km": 20528.0, "pct": 78.0},
+            {"km": 20529.0, "pct": 76.0}, {"km": 20530.0, "pct": 74.0},
+            {"km": 20531.0, "pct": 72.0}, {"km": 20532.0, "pct": 69.0},
+            {"km": 20533.0, "pct": 69.0}, {"km": 20534.0, "pct": 65.0},
+        ]
+        self.assertEqual(battery.range_per_full_charge(real), 38.2)

@@ -146,6 +146,10 @@ class BatteryRegistry:
         return ", ".join(sorted(battery_label(bms_id) for bms_id in self.installed))
 
 
+# More than this per kilometre is not riding but a battery swap.
+MAX_PCT_PER_KM = 8
+
+
 def range_per_full_charge(points: list[dict]) -> float | None:
     """Kilometres per 100 % of charge, from the drops in NIU's battery chart.
 
@@ -156,7 +160,10 @@ def range_per_full_charge(points: list[dict]) -> float | None:
     for first, second in zip(points, points[1:]):
         km = second["km"] - first["km"]
         pct = first["pct"] - second["pct"]
-        if km > 0 and pct > 0:
+        # A step of a few kilometres that used a plausible amount of charge.
+        # Bigger jumps are a charge or a swap to the other battery: NIU
+        # charts whichever battery sits in the compartment.
+        if 0 < km <= 3 and 0 <= pct <= MAX_PCT_PER_KM * km:
             distance += km
             used += pct
     if used < 10:

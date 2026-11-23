@@ -124,5 +124,11 @@
                 "name": "Alarm armed"
             }
         }
+    },
+    "services": {
+        "reread_ride_history": {
+            "name": "Read ride history again",
+            "description": "Reads the ride history from NIU again, starting with the newest ride. Rides already in the log keep their maps and place names."
+        }
     }
 }

@@ -461,7 +461,7 @@ class NiuApiExtrasTest(unittest.TestCase):
         tracks = self.api.get_tracks(10)
         self.assertEqual(tracks, [{"trackId": "A"}])
         body = api_module.requests.post.call_args.kwargs["json"]
-        self.assertEqual(body, {"index": "10", "pagesize": 5, "sn": "TEST-SN"})
+        self.assertEqual(body, {"index": "10", "pagesize": 5, "sn": "TEST-SN", "token": "access"})
 
     def test_messages_post_json_with_token(self) -> None:
         api_module.requests.post.return_value = FakeResponse(
