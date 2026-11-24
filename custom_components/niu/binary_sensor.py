@@ -23,8 +23,10 @@ def _flag(value) -> bool | None:
         lowered = value.strip().lower()
         if lowered in ("true", "on", "yes"):
             return True
-        if lowered in ("false", "off", "no", ""):
+        if lowered in ("false", "off", "no"):
             return False
+        if lowered == "":
+            return None  # not reported by this scooter (e.g. N1S 2019)
     try:
         return float(value) != 0
     except (TypeError, ValueError):

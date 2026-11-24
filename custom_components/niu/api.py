@@ -514,7 +514,19 @@ class NiuApi:
 
     def get_messages_raw(self) -> dict[str, Any]:
         result = self._post_json(MESSAGE_LIST_API_URI)
-        _LOGGER.debug("NIU message feed: %s", describe_shape(result))
+        _LOGGER.debug("NIU message feed (json): %s", describe_shape(result))
+        if not _data_items(result):
+            # The Android app sends this one form-encoded; try that as well.
+            self._ensure_access_token()
+            form = self._authenticated_request(
+                "POST",
+                MESSAGE_LIST_API_URI,
+                headers=self._locale_headers(),
+                data={"sn": self.sn, "token": self.token},
+            )
+            _LOGGER.debug("NIU message feed (form): %s", describe_shape(form))
+            if _data_items(form):
+                return form
         return result
 
     def is_charging(self) -> bool | None:
