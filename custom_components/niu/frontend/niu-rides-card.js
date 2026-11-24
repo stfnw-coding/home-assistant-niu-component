@@ -1,7 +1,7 @@
 // niu-rides-card: rittenlog van de NIU-integratie, per dag gegroepeerd, elke rit klapt uit met kaart.
 // Data komt uit de websocket-opdracht "niu/rides" van de integratie.
 
-const CARD_VERSION = "1.1.1";
+const CARD_VERSION = "1.2.0";
 
 const esc = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -200,6 +200,7 @@ class NiuRidesCard extends HTMLElement {
       gps: "Gereden route (GPS)",
       thumbnail: "Route overgenomen uit NIU",
       niu: "Routekaart van NIU",
+      ha: "NIU miste een deel van de rit · route uit Home Assistant (positie elke 2,5 min)",
       markers: "Geen route beschikbaar · alleen start en eind",
     }[ride.map_source] || "";
     const detail = open

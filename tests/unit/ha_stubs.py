@@ -249,8 +249,15 @@ def install_homeassistant_stubs() -> None:
     dt.utc_from_timestamp = lambda ts: datetime.fromtimestamp(ts, timezone.utc)
     util.dt = dt
 
+    entity_registry = types.ModuleType("homeassistant.helpers.entity_registry")
+    entity_registry.async_get = lambda hass: types.SimpleNamespace(
+        async_get_entity_id=lambda *args: None
+    )
+    helpers.entity_registry = entity_registry
+
     modules = {
         "homeassistant": homeassistant,
+        "homeassistant.helpers.entity_registry": entity_registry,
         "homeassistant.components.http": http,
         "homeassistant.components.websocket_api": websocket_api,
         "homeassistant.components.binary_sensor": binary_sensor,

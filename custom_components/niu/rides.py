@@ -11,6 +11,11 @@ from typing import Any
 STORAGE_VERSION = 1
 # Rides kept in the log; about a year of daily commuting.
 MAX_RIDES = 1000
+# Rides this recent are checked against Home Assistant's position history
+# (about the recorder's default keep period).
+TRAIL_DAYS = 9
+# NIU's route counts as complete when it covers this share of the ride.
+ROUTE_COMPLETE_SHARE = 0.6
 # How far back the first backfill reads the ride history.
 BACKFILL_DAYS = 120
 # NIU's ride list is paged: "index" is the page number, not an offset.
@@ -144,6 +149,8 @@ class RideLog:
                 changed = True
                 continue
             for field in _NIU_FIELDS:
+                if field == "end_point" and existing.get("end_corrected"):
+                    continue  # NIU's end point was wrong; keep the corrected one
                 if ride[field] is not None and existing.get(field) != ride[field]:
                     existing[field] = ride[field]
                     changed = True
@@ -162,8 +169,21 @@ class RideLog:
         digest = hashlib.sha256(f"{self.salt}:{ride_id}".encode()).hexdigest()[:24]
         return f"{digest}.jpg"
 
-    def needing_map(self) -> list[dict]:
-        return [ride for ride in self.ordered() if not ride.get("map")]
+    def needing_map(self, now: datetime | None = None) -> list[dict]:
+        """Rides without a map, then recent rides whose route was not checked
+        against Home Assistant's own position history yet."""
+        missing = [ride for ride in self.ordered() if not ride.get("map")]
+        if now is None:
+            return missing
+        recent = (now - timedelta(days=TRAIL_DAYS)).isoformat()
+        unchecked = [
+            ride
+            for ride in self.ordered()
+            if ride.get("map")
+            and not ride.get("route_checked")
+            and (ride.get("start") or "") >= recent
+        ]
+        return missing + unchecked
 
     def needing_places(self) -> list[dict]:
         return [
@@ -230,6 +250,53 @@ def distance_m(a: tuple[float, float], b: tuple[float, float]) -> float:
         + math.cos(lat1) * math.cos(lat2) * math.sin((lng2 - lng1) / 2) ** 2
     )
     return 2 * 6371000 * math.asin(math.sqrt(h))
+
+
+def path_length(points) -> float:
+    """Length in metres of a polyline of (lat, lng) points."""
+    return sum(
+        distance_m(tuple(a), tuple(b)) for a, b in zip(points, points[1:])
+    )
+
+
+def segments_length(segments) -> float:
+    return sum(distance_m(tuple(a), tuple(b)) for a, b in segments or [])
+
+
+def choose_route(
+    ride: dict,
+    niu_points: list | None,
+    niu_segments: list | None,
+    trail: list,
+) -> tuple[str, list | None]:
+    """Pick the best route source for a ride.
+
+    Returns ``(source, points)``: ``"niu"`` keeps NIU's own route (GPS
+    points or the traced thumbnail); ``"ha"`` uses the positions Home
+    Assistant recorded during the ride, with the ride's start in front.
+    NIU sometimes stores only the first part of a ride (and puts the end
+    point there); Home Assistant's own trail then shows where it went.
+    """
+    expected = ride.get("distance_m") or 0
+    if niu_points and len(niu_points) >= 2:
+        niu_length = path_length(niu_points)
+    elif niu_segments:
+        niu_length = segments_length(niu_segments)
+    elif ride.get("start_point") and ride.get("end_point"):
+        niu_length = distance_m(tuple(ride["start_point"]), tuple(ride["end_point"]))
+    else:
+        niu_length = 0.0
+    if not expected or niu_length >= ROUTE_COMPLETE_SHARE * expected:
+        return "niu", None
+
+    route = []
+    for point in ([ride["start_point"]] if ride.get("start_point") else []) + list(trail):
+        point = [round(point[0], 6), round(point[1], 6)]
+        if not route or point != route[-1]:
+            route.append(point)
+    if len(route) >= 2 and path_length(route) > niu_length * 1.3:
+        return "ha", route
+    return "niu", None
 
 
 def zone_name(point: list[float], zones: list[dict]) -> str | None:

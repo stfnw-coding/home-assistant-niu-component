@@ -2,7 +2,8 @@
   "domain": "niu",
   "name": "NIU",
   "after_dependencies": [
-    "frontend"
+    "frontend",
+    "recorder"
   ],
   "codeowners": [
     "@mwestra",

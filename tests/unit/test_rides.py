@@ -169,3 +169,60 @@ class PlaceTest(unittest.TestCase):
             "Oud-West, Amsterdam",
         )
         self.assertIsNone(rides.address_label("nope"))
+
+
+class RouteChoiceTest(unittest.TestCase):
+    """NIU sometimes keeps only the first part of a ride."""
+
+    # 24 Nov 2026: 6.76 km to Amsterdam-Noord; NIU kept the first ~1 km.
+    TRAIL = [
+        (52.359683, 4.854649), (52.364509, 4.857871), (52.367172, 4.872077),
+        (52.371623, 4.882956), (52.380947, 4.888946), (52.380443, 4.899354),
+        (52.381103, 4.900853), (52.382114, 4.903091), (52.386703, 4.905975),
+        (52.389347, 4.903252),
+    ]
+
+    def ride(self, end):
+        return {
+            "distance_m": 6763,
+            "start_point": [52.359683, 4.854649],
+            "end_point": list(end),
+        }
+
+    def test_incomplete_niu_route_uses_the_trail(self) -> None:
+        niu_points = [(52.359683, 4.854649), (52.3630, 4.8560), (52.3665, 4.8574)]
+        source, route = rides.choose_route(
+            self.ride((52.3665, 4.8574)), niu_points, None, self.TRAIL
+        )
+        self.assertEqual(source, "ha")
+        self.assertEqual(route[-1], [52.389347, 4.903252])
+        self.assertEqual(route[0], [52.359683, 4.854649])
+
+    def test_complete_niu_route_is_kept(self) -> None:
+        source, route = rides.choose_route(
+            self.ride((52.389347, 4.903252)), list(self.TRAIL), None, self.TRAIL
+        )
+        self.assertEqual((source, route), ("niu", None))
+
+    def test_without_trail_niu_is_kept(self) -> None:
+        source, _ = rides.choose_route(self.ride((52.3665, 4.8574)), None, None, [])
+        self.assertEqual(source, "niu")
+
+    def test_corrected_end_point_survives_a_refresh(self) -> None:
+        log = rides.RideLog()
+        log.merge([track("T1", NOW)])
+        log.rides["T1"].update(
+            {"end_point": [52.389347, 4.903252], "end_corrected": True, "map": "/m.jpg"}
+        )
+        log.merge([track("T1", NOW)])
+        self.assertEqual(log.rides["T1"]["end_point"], [52.389347, 4.903252])
+        self.assertEqual(log.rides["T1"]["map"], "/m.jpg")
+
+    def test_recent_unchecked_rides_need_a_check(self) -> None:
+        log = rides.RideLog()
+        log.merge([track("NEW", NOW), track("OLD", NOW - timedelta(days=30))])
+        for ride in log.rides.values():
+            ride["map"] = "/m.jpg"
+        self.assertEqual([r["id"] for r in log.needing_map(NOW)], ["NEW"])
+        log.rides["NEW"]["route_checked"] = True
+        self.assertEqual(log.needing_map(NOW), [])

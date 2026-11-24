@@ -383,3 +383,63 @@ async def test_full_setup(hass: HomeAssistant, hass_ws_client) -> None:
         await hass.async_block_till_done()
         image = await async_get_image(hass, camera_id)
         assert any("tile.openstreetmap.org" in url for url in client.urls)
+
+
+async def test_trail_from_recorder(recorder_mock, hass: HomeAssistant) -> None:
+    """The ride map can fall back on the positions HA recorded itself."""
+    from datetime import timedelta
+
+    from pytest_homeassistant_custom_component.components.recorder.common import (
+        async_wait_recording_done,
+    )
+
+    from homeassistant.util import dt as dt_util
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="SN123",
+        data={
+            CONF_AUTH: {
+                CONF_USERNAME: "u@example.com",
+                CONF_PASSWORD: "pw",
+                CONF_SCOOTER_ID: 0,
+                CONF_SENSORS: ["BatteryChargeA"],
+            }
+        },
+    )
+    entry.add_to_hass(hass)
+    api = "custom_components.niu.api.NiuApi"
+    with (
+        patch(f"{api}.initialize", _initialize),
+        patch(f"{api}.updateBat", _update_bat),
+        patch(f"{api}.updateMoto", _update_moto),
+        patch(f"{api}.updateTrackInfo", _update_track),
+        patch(f"{api}.post_track_detail", _detail),
+        patch(f"{api}.get_tracks", lambda self, page=0, pagesize=5: []),
+        patch(f"{api}.get_cycling_statistics", _cycling),
+        patch(f"{api}.get_firmware", _firmware),
+        patch(f"{api}.get_messages_raw", _messages),
+        patch(f"{api}.get_battery_health", _health),
+        patch(f"{api}.get_battery_chart", _chart),
+        patch("custom_components.niu.ride_maps.get_async_client", return_value=_Client()),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        tracker = er.async_get(hass).async_get_entity_id(
+            "device_tracker", DOMAIN, "niu_scooter_SN123_location"
+        )
+        start = dt_util.utcnow()
+        for lat, lng in ((52.3645, 4.8578), (52.3716, 4.8829), (52.3893, 4.9032)):
+            hass.states.async_set(
+                tracker, "not_home", {"latitude": lat, "longitude": lng, "source_type": "gps"}
+            )
+            await hass.async_block_till_done()
+        await async_wait_recording_done(hass)
+        coordinator = hass.data[DOMAIN][entry.entry_id]
+        mapper = coordinator._ride_mapper
+        ride = {
+            "start": (start - timedelta(seconds=10)).isoformat(),
+            "end": (dt_util.utcnow() + timedelta(seconds=1)).isoformat(),
+        }
+        trail = await mapper._async_trail(ride, coordinator.api)
+        assert trail[-3:] == [(52.3645, 4.8578), (52.3716, 4.8829), (52.3893, 4.9032)]

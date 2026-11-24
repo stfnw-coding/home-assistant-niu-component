@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
+from datetime import timedelta
+from functools import partial
 import logging
 from pathlib import Path
 from time import monotonic
@@ -11,11 +13,13 @@ from time import monotonic
 import httpx
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.httpx_client import get_async_client
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .map_render import TILE_STYLES, fit_viewport, render_route, tile_url
-from .rides import RideLog, address_label, place_key, zone_name
+from .rides import RideLog, address_label, choose_route, place_key, zone_name
 from .thumb_route import route_from_thumbnail
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,6 +42,7 @@ TILE_TIMEOUT = 10
 TILE_TOTAL_TIMEOUT = 25
 TILE_CACHE_SIZE = 256
 RETRY_FAILED_AFTER = 6 * 60 * 60
+TRAIL_AFTER_END = 180
 
 
 def _is_image(content: bytes) -> bool:
@@ -135,7 +140,7 @@ class RideMapper:
     async def _async_maps(self, log: RideLog, api) -> bool:
         changed = False
         drawn = 0
-        for ride in log.needing_map():
+        for ride in log.needing_map(dt_util.utcnow()):
             if drawn >= MAPS_PER_CYCLE:
                 break
             failed_at = self._failed.get(ride["id"])
@@ -143,7 +148,10 @@ class RideMapper:
                 continue
             drawn += 1
             try:
-                result = await self._async_draw(log, ride, api)
+                if ride.get("map"):
+                    result = await self._async_recheck(log, ride, api)
+                else:
+                    result = await self._async_draw(log, ride, api)
             except Exception:  # noqa: BLE001 - one ride must not stop the others
                 _LOGGER.exception("Could not draw the map of NIU ride %s", ride["id"])
                 result = None
@@ -151,6 +159,7 @@ class RideMapper:
                 self._failed[ride["id"]] = monotonic()
                 continue
             ride["map"], ride["map_source"] = result
+            ride["route_checked"] = True
             changed = True
         return changed
 
@@ -174,8 +183,23 @@ class RideMapper:
                 except Exception:  # noqa: BLE001
                     segments = None
 
+        trail = await self._async_trail(ride, api)
+        choice, route = choose_route(ride, points, segments, trail)
+
         filename = log.map_filename(ride["id"])
-        if points and len(points) >= 2:
+        if choice == "ha":
+            image, source = await self._async_render(route, None, True), "ha"
+            if image is not None and route[-1] != ride.get("end_point"):
+                _LOGGER.debug(
+                    "NIU ride %s: NIU's route covers too little of the %s m; "
+                    "using Home Assistant's positions",
+                    ride["id"],
+                    ride.get("distance_m"),
+                )
+                ride["end_point"] = route[-1]
+                ride["end_corrected"] = True
+                ride.pop("to", None)
+        elif points and len(points) >= 2:
             image, source = await self._async_render(points, None, True), "gps"
         elif segments and ends:
             image, source = await self._async_render(ends, segments, True), "thumbnail"
@@ -192,6 +216,61 @@ class RideMapper:
             filename = filename.replace(".jpg", ".png")
         await self.hass.async_add_executor_job(self._write, filename, image)
         return f"{MAP_URL_PATH}/{filename}", source
+
+    async def _async_recheck(self, log: RideLog, ride: dict, api) -> tuple[str, str] | None:
+        """Redraw an existing map only when NIU's route turns out incomplete."""
+        trail = await self._async_trail(ride, api)
+        choice, _route = choose_route(ride, None, None, trail)
+        if choice != "ha":
+            return ride["map"], ride.get("map_source") or "niu"
+        return await self._async_draw(log, ride, api)
+
+    async def _async_trail(self, ride: dict, api) -> list[tuple[float, float]]:
+        """Positions Home Assistant recorded for the scooter during the ride."""
+        try:
+            start = dt_util.parse_datetime(ride.get("start") or "")
+            end = dt_util.parse_datetime(ride.get("end") or "")
+        except ValueError:
+            return []
+        if start is None or end is None:
+            return []
+        entity_id = er.async_get(self.hass).async_get_entity_id(
+            "device_tracker", DOMAIN, f"niu_scooter_{api.sn}_location"
+        )
+        if entity_id is None or "recorder" not in self.hass.config.components:
+            return []
+        try:
+            from homeassistant.components.recorder import get_instance, history
+
+            # Every update counts, not only state changes: the position is an
+            # attribute and the state stays "not_home" during a ride.
+            states = await get_instance(self.hass).async_add_executor_job(
+                partial(
+                    history.get_significant_states,
+                    self.hass,
+                    start - timedelta(seconds=30),
+                    # NIU is polled every 150 s: the position after the ride
+                    # ended still belongs to it.
+                    end + timedelta(seconds=TRAIL_AFTER_END),
+                    [entity_id],
+                    include_start_time_state=False,
+                    significant_changes_only=False,
+                    minimal_response=False,
+                    no_attributes=False,
+                )
+            )
+        except Exception:  # noqa: BLE001 - the trail is a nice-to-have
+            _LOGGER.debug("Could not read the scooter's position history", exc_info=True)
+            return []
+        trail = []
+        for state in states.get(entity_id, []):
+            if not hasattr(state, "attributes"):
+                continue
+            lat = state.attributes.get("latitude")
+            lng = state.attributes.get("longitude")
+            if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+                trail.append((float(lat), float(lng)))
+        return trail
 
     def _write(self, filename: str, image: bytes) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
