@@ -91,6 +91,7 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
         self.mileage_days: list[dict] | None = None
         self.firmware: dict | None = None
         self.messages: list[dict] | None = None
+        self.messages_raw: dict | None = None
         self.battery_chart: list[dict] | None = None
         self._battery_health: dict | None = None
         self._next_fetch: dict[str, float] = {}
@@ -185,7 +186,12 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
         self.firmware = self.api.get_firmware()
 
     def _fetch_messages(self) -> None:
-        messages = self.api.get_messages()
+        raw = getattr(self.api, "get_messages_raw", None)
+        if raw is not None:
+            self.messages_raw = raw()
+            messages = track_items(self.messages_raw)
+        else:
+            messages = self.api.get_messages()
         if self.messages is not None:
             seen = {message_id(message) for message in self.messages}
             self._new_messages.extend(

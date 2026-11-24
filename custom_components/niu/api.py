@@ -510,7 +510,12 @@ class NiuApi:
 
     def get_messages(self) -> list[dict]:
         """Return NIU's notification feed (alarms, ride summaries, ...)."""
-        return _data_items(self._post_json(MESSAGE_LIST_API_URI))
+        return _data_items(self.get_messages_raw())
+
+    def get_messages_raw(self) -> dict[str, Any]:
+        result = self._post_json(MESSAGE_LIST_API_URI)
+        _LOGGER.debug("NIU message feed: %s", describe_shape(result))
+        return result
 
     def is_charging(self) -> bool | None:
         """Whether a charger is really connected.

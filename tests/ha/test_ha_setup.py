@@ -123,7 +123,7 @@ MESSAGES = [{"msgId": "M1", "title": "Rit voltooid", "time": 1795297702000, "mai
 
 
 def _messages(self):
-    return list(MESSAGES)
+    return {"status": 0, "data": {"items": list(MESSAGES)}}
 
 
 def _health(self):
@@ -219,7 +219,7 @@ async def test_full_setup(hass: HomeAssistant, hass_ws_client) -> None:
         patch(f"{api}.get_tracks", _get_tracks),
         patch(f"{api}.get_cycling_statistics", _cycling),
         patch(f"{api}.get_firmware", _firmware),
-        patch(f"{api}.get_messages", _messages),
+        patch(f"{api}.get_messages_raw", _messages),
         patch(f"{api}.get_battery_health", _health),
         patch(f"{api}.get_battery_chart", _chart),
         patch("custom_components.niu.camera.get_async_client", return_value=client),
@@ -294,6 +294,12 @@ async def test_full_setup(hass: HomeAssistant, hass_ws_client) -> None:
         map_file = hass.config.path(older["map"].lstrip("/"))
         assert Image.open(map_file).size == (720, 450)
         print("ride:", older)
+
+        from custom_components.niu.diagnostics import async_get_config_entry_diagnostics
+
+        diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+        assert diagnostics["motor_index_info"]["data"]["postion"] == "**REDACTED**"
+        assert diagnostics["messages_raw"]["data"]["items"][0]["title"] == "Rit voltooid"
 
         # A new NIU message fires an event.
         events = []
