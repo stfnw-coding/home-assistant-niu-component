@@ -224,5 +224,19 @@ class RouteChoiceTest(unittest.TestCase):
         for ride in log.rides.values():
             ride["map"] = "/m.jpg"
         self.assertEqual([r["id"] for r in log.needing_map(NOW)], ["NEW"])
-        log.rides["NEW"]["route_checked"] = True
+        log.rides["NEW"]["route_checked"] = True  # checked by an older version
+        self.assertEqual([r["id"] for r in log.needing_map(NOW)], ["NEW"])
+        log.rides["NEW"]["route_checked"] = rides.ROUTE_CHECK_VERSION
         self.assertEqual(log.needing_map(NOW), [])
+
+
+class PlaceRefreshTest(unittest.TestCase):
+    def test_moved_end_point_gets_a_new_place_name(self) -> None:
+        log = rides.RideLog()
+        log.merge([track("T1", NOW, lastPoint={"lat": 52.3665, "lng": 4.8574})])
+        log.rides["T1"].update({"from": "Thuis", "to": "Baarsjesweg", "map": "/m.jpg"})
+        log.merge([track("T1", NOW, lastPoint={"lat": 52.389347, "lng": 4.903609})])
+        ride = log.rides["T1"]
+        self.assertEqual(ride["from"], "Thuis")
+        self.assertNotIn("to", ride)
+        self.assertNotIn("map", ride)

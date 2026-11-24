@@ -16,6 +16,8 @@ MAX_RIDES = 1000
 TRAIL_DAYS = 9
 # NIU's route counts as complete when it covers this share of the ride.
 ROUTE_COMPLETE_SHARE = 0.6
+# Bumped when the route check improves, so recent rides are checked again.
+ROUTE_CHECK_VERSION = 2
 # How far back the first backfill reads the ride history.
 BACKFILL_DAYS = 120
 # NIU's ride list is paged: "index" is the page number, not an offset.
@@ -158,6 +160,12 @@ class RideLog:
                         # The route changed: draw the map again.
                         existing.pop("map", None)
                         existing.pop("map_source", None)
+                        existing.pop("route_checked", None)
+                    # A moved start or end point needs its place name again.
+                    if field == "start_point":
+                        existing.pop("from", None)
+                    if field == "end_point":
+                        existing.pop("to", None)
         if len(self.rides) > MAX_RIDES:
             for ride in self.ordered()[MAX_RIDES:]:
                 del self.rides[ride["id"]]
@@ -180,7 +188,7 @@ class RideLog:
             ride
             for ride in self.ordered()
             if ride.get("map")
-            and not ride.get("route_checked")
+            and ride.get("route_checked") != ROUTE_CHECK_VERSION
             and (ride.get("start") or "") >= recent
         ]
         return missing + unchecked

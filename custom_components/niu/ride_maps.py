@@ -19,7 +19,14 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .map_render import TILE_STYLES, fit_viewport, render_route, tile_url
-from .rides import RideLog, address_label, choose_route, place_key, zone_name
+from .rides import (
+    ROUTE_CHECK_VERSION,
+    RideLog,
+    address_label,
+    choose_route,
+    place_key,
+    zone_name,
+)
 from .thumb_route import route_from_thumbnail
 
 _LOGGER = logging.getLogger(__name__)
@@ -148,10 +155,7 @@ class RideMapper:
                 continue
             drawn += 1
             try:
-                if ride.get("map"):
-                    result = await self._async_recheck(log, ride, api)
-                else:
-                    result = await self._async_draw(log, ride, api)
+                result = await self._async_draw(log, ride, api)
             except Exception:  # noqa: BLE001 - one ride must not stop the others
                 _LOGGER.exception("Could not draw the map of NIU ride %s", ride["id"])
                 result = None
@@ -159,7 +163,7 @@ class RideMapper:
                 self._failed[ride["id"]] = monotonic()
                 continue
             ride["map"], ride["map_source"] = result
-            ride["route_checked"] = True
+            ride["route_checked"] = ROUTE_CHECK_VERSION
             changed = True
         return changed
 
@@ -216,14 +220,6 @@ class RideMapper:
             filename = filename.replace(".jpg", ".png")
         await self.hass.async_add_executor_job(self._write, filename, image)
         return f"{MAP_URL_PATH}/{filename}", source
-
-    async def _async_recheck(self, log: RideLog, ride: dict, api) -> tuple[str, str] | None:
-        """Redraw an existing map only when NIU's route turns out incomplete."""
-        trail = await self._async_trail(ride, api)
-        choice, _route = choose_route(ride, None, None, trail)
-        if choice != "ha":
-            return ride["map"], ride.get("map_source") or "niu"
-        return await self._async_draw(log, ride, api)
 
     async def _async_trail(self, ride: dict, api) -> list[tuple[float, float]]:
         """Positions Home Assistant recorded for the scooter during the ride."""
