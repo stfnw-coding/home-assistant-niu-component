@@ -25,6 +25,7 @@ from .rides import (
     address_label,
     choose_route,
     place_key,
+    place_outdated,
     zone_name,
 )
 from .thumb_route import route_from_thumbnail
@@ -99,7 +100,7 @@ class RideMapper:
         for ride in log.needing_places():
             for field, point_field in (("from", "start_point"), ("to", "end_point")):
                 point = ride.get(point_field)
-                if field in ride or not point:
+                if not place_outdated(ride, field, point_field):
                     continue
                 name = zone_name(point, zones)
                 if name is None:
@@ -114,6 +115,8 @@ class RideMapper:
                             continue
                         log.places[key] = name
                 ride[field] = name
+                # Remember which point the name is for: NIU sometimes moves it.
+                ride[f"{field}_point"] = list(point)
                 changed = True
         return changed
 

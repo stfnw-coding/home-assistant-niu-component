@@ -240,3 +240,14 @@ class PlaceRefreshTest(unittest.TestCase):
         self.assertEqual(ride["from"], "Thuis")
         self.assertNotIn("to", ride)
         self.assertNotIn("map", ride)
+
+
+class PlaceOutdatedTest(unittest.TestCase):
+    def test_name_for_an_older_point_is_outdated(self) -> None:
+        ride = {"end_point": [52.389347, 4.903609], "to": "Baarsjesweg"}
+        self.assertTrue(rides.place_outdated(ride, "to", "end_point"))
+        ride["to_point"] = [52.366, 4.857]
+        self.assertTrue(rides.place_outdated(ride, "to", "end_point"))
+        ride["to_point"] = [52.389347, 4.903609]
+        self.assertFalse(rides.place_outdated(ride, "to", "end_point"))
+        self.assertFalse(rides.place_outdated({}, "from", "start_point"))

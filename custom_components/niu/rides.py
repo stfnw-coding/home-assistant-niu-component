@@ -197,8 +197,8 @@ class RideLog:
         return [
             ride
             for ride in self.ordered()
-            if ("from" not in ride and ride.get("start_point"))
-            or ("to" not in ride and ride.get("end_point"))
+            if place_outdated(ride, "from", "start_point")
+            or place_outdated(ride, "to", "end_point")
         ]
 
     @property
@@ -244,6 +244,14 @@ class RideLog:
         self.backfill_index = 0
         self.backfill_empty = 0
         self.backfill_trace = []
+
+
+def place_outdated(ride: dict, field: str, point_field: str) -> bool:
+    """Whether a ride's place name is missing or belongs to an older point."""
+    point = ride.get(point_field)
+    if not point:
+        return False
+    return field not in ride or ride.get(f"{field}_point") != point
 
 
 def place_key(point: list[float]) -> str:
