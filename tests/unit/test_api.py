@@ -198,6 +198,31 @@ class NiuApiTest(unittest.TestCase):
         retry_headers = api_module.requests.get.call_args_list[1].kwargs["headers"]
         self.assertEqual(retry_headers["token"], "new-access")
 
+    def test_failed_login_waits_before_trying_again(self) -> None:
+        """A login service that is down is not asked again on every poll."""
+        self.set_authenticated("old-access", refresh_token="refresh-token")
+        rejected = FakeResponse(200, {"status": 1131, "desc": "Fout inloggegevens"})
+        api_module.requests.get.return_value = rejected
+        api_module.requests.post.return_value = FakeResponse(504, {})
+
+        with patch.object(api_module, "monotonic", return_value=0):
+            with self.assertRaises(api_module.NiuApiError):
+                self.api.get_info(api_module.MOTOR_BATTERY_API_URI)
+        logins = api_module.requests.post.call_count
+        self.assertEqual(logins, 2)  # refresh token, then password
+
+        with patch.object(api_module, "monotonic", return_value=60):
+            with self.assertRaises(api_module.NiuAuthenticationError):
+                self.api.get_info(api_module.MOTOR_BATTERY_API_URI)
+        self.assertEqual(api_module.requests.post.call_count, logins)
+
+        api_module.requests.get.side_effect = [rejected, data_response("back")]
+        api_module.requests.post.return_value = token_response("new-access")
+        later = api_module.RECOVERY_BACKOFF + 1
+        with patch.object(api_module, "monotonic", return_value=later):
+            result = self.api.get_info(api_module.MOTOR_BATTERY_API_URI)
+        self.assertEqual(result["data"]["value"], "back")
+
     def test_401_relogs_in_when_refresh_token_is_rejected(self) -> None:
         """A rejected refresh token should fall back to a password login."""
         self.set_authenticated("old-access", refresh_token="invalid-refresh")

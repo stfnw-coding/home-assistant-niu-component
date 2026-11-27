@@ -27,6 +27,8 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 # NIU statuses that mean "log in again" on an ordinary request.
 TOKEN_REJECTED_STATUSES = (1131,)
+# After a failed login, wait this long before trying again (seconds).
+RECOVERY_BACKOFF = 10 * 60
 
 APP_ID = "niu_ktdrr960"
 REQUEST_TIMEOUT = (10, 30)
@@ -109,6 +111,7 @@ class NiuApi:
 
         self.token = None
         self.refresh_token = None
+        self._recovery_blocked_until = 0.0
         self._token_refresh_at = None
         self._auth_generation = 0
         self._auth_lock = Lock()
@@ -262,15 +265,26 @@ class NiuApi:
         with self._auth_lock:
             if self._auth_generation != attempted_generation:
                 return
+            if monotonic() < self._recovery_blocked_until:
+                # A login just failed: do not hammer NIU's login service (and
+                # risk a temporary account lock) on every poll.
+                raise NiuAuthenticationError(
+                    "NIU rejected the token; waiting before logging in again"
+                )
 
-            if self.refresh_token:
-                try:
-                    self.refresh_access_token()
-                    return
-                except NiuApiError as err:
-                    _LOGGER.warning("NIU token refresh failed; logging in again: %s", err)
-
-            self._password_login()
+            try:
+                if self.refresh_token:
+                    try:
+                        self.refresh_access_token()
+                        return
+                    except NiuApiError as err:
+                        _LOGGER.warning(
+                            "NIU token refresh failed; logging in again: %s", err
+                        )
+                self._password_login()
+            except NiuApiError:
+                self._recovery_blocked_until = monotonic() + RECOVERY_BACKOFF
+                raise
 
     def _authenticated_request(
         self,
