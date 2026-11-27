@@ -156,7 +156,12 @@ class RideLog:
                 continue
             for field in _NIU_FIELDS:
                 if field == "end_point" and existing.get("end_corrected"):
-                    continue  # NIU's end point was wrong; keep the corrected one
+                    # NIU's end point was wrong; keep the corrected one, but
+                    # remember NIU's latest for when the route is checked again.
+                    if ride[field] is not None and existing.get("niu_end_point") != ride[field]:
+                        existing["niu_end_point"] = ride[field]
+                        changed = True
+                    continue
                 if ride[field] is not None and existing.get(field) != ride[field]:
                     existing[field] = ride[field]
                     changed = True

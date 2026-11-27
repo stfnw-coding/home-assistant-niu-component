@@ -217,6 +217,8 @@ class RouteChoiceTest(unittest.TestCase):
         log.merge([track("T1", NOW)])
         self.assertEqual(log.rides["T1"]["end_point"], [52.389347, 4.903252])
         self.assertEqual(log.rides["T1"]["map"], "/m.jpg")
+        # NIU's own end point is remembered for the next route check.
+        self.assertEqual(log.rides["T1"]["niu_end_point"], [52.3701, 4.8601])
 
     def test_recent_unchecked_rides_need_a_check(self) -> None:
         log = rides.RideLog()

@@ -291,7 +291,9 @@ async def test_full_setup(hass: HomeAssistant, hass_ws_client) -> None:
         assert older["to"] == "Overtoom 12, Amsterdam"
         assert older["map"].startswith("/niu_ritten/")
         assert older["map_source"] == "markers"
-        map_file = hass.config.path(older["map"].lstrip("/"))
+        # A new URL for every drawing: the maps are served with a long cache time.
+        assert "?v=" in older["map"]
+        map_file = hass.config.path(older["map"].split("?")[0].lstrip("/"))
         assert Image.open(map_file).size == (720, 450)
         print("ride:", older)
 

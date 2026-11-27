@@ -48,7 +48,13 @@ def _coordinator(hass: HomeAssistant, entry_id: str | None):
 
 
 def public_ride(ride: dict) -> dict[str, Any]:
-    return {field: ride.get(field) for field in RIDE_FIELDS}
+    public = {field: ride.get(field) for field in RIDE_FIELDS}
+    if public["map"] and ride.get("map_drawn"):
+        # Maps are served with a long cache time and keep their file name when
+        # redrawn: a new URL per drawing makes browsers load the new map.
+        stamp = "".join(ch for ch in ride["map_drawn"] if ch.isdigit())[:14]
+        public["map"] = f"{public['map']}?v={stamp}"
+    return public
 
 
 @websocket_api.websocket_command(

@@ -53,6 +53,10 @@ RETRY_FAILED_AFTER = 6 * 60 * 60
 TRAIL_AFTER_END = 180
 
 
+# Ride fields a drawing may change.
+_DRAW_FIELDS = ("end_point", "end_corrected", "niu_end_point", "to", "to_point")
+
+
 def _is_image(content: bytes) -> bool:
     return content.startswith((b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"GIF8")) or (
         content.startswith(b"RIFF") and content[8:12] == b"WEBP"
@@ -157,12 +161,17 @@ class RideMapper:
             if failed_at is not None and monotonic() - failed_at < RETRY_FAILED_AFTER:
                 continue
             drawn += 1
+            before = {key: ride[key] for key in _DRAW_FIELDS if key in ride}
             try:
                 result = await self._async_draw(log, ride, api)
             except Exception:  # noqa: BLE001 - one ride must not stop the others
                 _LOGGER.exception("Could not draw the map of NIU ride %s", ride["id"])
                 result = None
             if result is None:
+                # Keep the ride as it was with its current map.
+                for key in _DRAW_FIELDS:
+                    ride.pop(key, None)
+                ride.update(before)
                 self._failed[ride["id"]] = monotonic()
                 continue
             ride["map"], ride["map_source"] = result
