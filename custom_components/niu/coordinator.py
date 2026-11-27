@@ -35,6 +35,9 @@ _LOGGER = logging.getLogger(__name__)
 POLL_INTERVAL = timedelta(seconds=150)
 # Poll faster while the scooter is switched on: more positions for the ride map.
 RIDING_POLL_INTERVAL = timedelta(seconds=60)
+# NIU data kept on disk for a restart during an outage.
+SNAPSHOT_API_FIELDS = ("dataBat", "dataMoto", "dataMotoInfo", "dataTrackInfo")
+SNAPSHOT_SAVE_DELAY = 5 * 60
 # Keep polling fast this long after the scooter last moved.
 RIDING_LINGER = 5 * 60
 MOVED_METERS = 80
@@ -76,6 +79,7 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
         rides: RideLog | None = None,
         rides_store=None,
         ride_mapper=None,
+        snapshot_store=None,
     ) -> None:
         super().__init__(
             hass,
@@ -92,6 +96,7 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
         self.rides = rides or RideLog()
         self._rides_store = rides_store
         self._ride_mapper = ride_mapper
+        self._snapshot_store = snapshot_store
         self._rides_changed = False
         # Extras that change slowly: (data, monotonic time of the last fetch).
         self.mileage_months: list[dict] | None = None
@@ -291,12 +296,58 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
         self.last_error = None
         self.last_success = dt_util.utcnow()
         self._adjust_interval(api)
+        if self._snapshot_store is not None:
+            self._snapshot_store.async_delay_save(self.snapshot, SNAPSHOT_SAVE_DELAY)
         self._process_batteries(api)
         await self._async_process_rides(api)
         for message in reversed(self._new_messages):
             self.hass.bus.async_fire(EVENT_NIU_MESSAGE, message_event(message))
         self._new_messages.clear()
         return api
+
+    def snapshot(self) -> dict:
+        """The last NIU data, so a restart during an outage can show it."""
+        api = self.api
+        return {
+            "time": self.last_success.isoformat() if self.last_success else None,
+            "sn": api.sn,
+            "sensor_prefix": getattr(api, "sensor_prefix", None),
+            **{field: getattr(api, field, None) for field in SNAPSHOT_API_FIELDS},
+            "mileage_months": self.mileage_months,
+            "mileage_days": self.mileage_days,
+            "firmware": self.firmware,
+            "battery_chart": self.battery_chart,
+        }
+
+    def restore_snapshot(self, snapshot: dict | None) -> bool:
+        """Start from the stored data when NIU does not answer at startup."""
+        if not isinstance(snapshot, dict) or not snapshot.get("sn"):
+            return False
+        try:
+            taken = dt_util.parse_datetime(snapshot.get("time") or "")
+        except ValueError:
+            taken = None
+        if taken is None or dt_util.utcnow() - taken > KEEP_LAST_DATA:
+            return False
+        api = self.api
+        api.sn = snapshot["sn"]
+        if snapshot.get("sensor_prefix"):
+            api.sensor_prefix = snapshot["sensor_prefix"]
+        for field in SNAPSHOT_API_FIELDS:
+            if snapshot.get(field) is not None:
+                setattr(api, field, snapshot[field])
+        self.mileage_months = snapshot.get("mileage_months")
+        self.mileage_days = snapshot.get("mileage_days")
+        self.firmware = snapshot.get("firmware")
+        self.battery_chart = snapshot.get("battery_chart")
+        self.last_success = taken
+        self.last_error = self.last_error or "NIU did not answer at startup"
+        self.data = api
+        self.last_update_success = True
+        _LOGGER.warning(
+            "NIU did not answer at startup; showing the data from %s", taken.isoformat()
+        )
+        return True
 
     def _adjust_interval(self, api: NiuApi) -> None:
         """Poll faster during a ride, for a more detailed route on the map.

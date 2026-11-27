@@ -470,3 +470,65 @@ async def test_trail_from_recorder(recorder_mock, hass: HomeAssistant) -> None:
         }
         trail = await mapper._async_trail(ride, coordinator.api)
         assert trail == [(52.3645, 4.8578), (52.3716, 4.8829), (52.3893, 4.9032)]
+
+
+async def test_start_during_outage_uses_last_data(hass: HomeAssistant, hass_storage) -> None:
+    """A restart while NIU is down shows the stored data instead of nothing."""
+    from homeassistant.config_entries import ConfigEntryState
+    from homeassistant.util import dt as dt_util
+
+    from custom_components.niu.api import NiuServerError
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="SN123",
+        data={
+            CONF_AUTH: {
+                CONF_USERNAME: "u@example.com",
+                CONF_PASSWORD: "pw",
+                CONF_SCOOTER_ID: 0,
+                CONF_SENSORS: ["BatteryChargeA"],
+            }
+        },
+    )
+    entry.add_to_hass(hass)
+    api = "custom_components.niu.api.NiuApi"
+    snapshot = {
+        "time": dt_util.utcnow().isoformat(),
+        "sn": "SN123",
+        "sensor_prefix": "Niu N1s",
+        "dataBat": {"data": {"batteries": BATTERY}},
+        "dataMoto": {"data": {"postion": {"lat": 52.359718, "lng": 4.854374}, "gsm": 31}},
+        "dataMotoInfo": None,
+        "dataTrackInfo": None,
+    }
+    hass_storage[f"{DOMAIN}.{entry.entry_id}.snapshot"] = {
+        "version": 1,
+        "key": f"{DOMAIN}.{entry.entry_id}.snapshot",
+        "data": snapshot,
+    }
+
+    def _down(self):
+        raise NiuServerError(504)
+
+    with (
+        patch(f"{api}.initialize", _down),
+        patch("custom_components.niu.ride_maps.get_async_client", return_value=_Client()),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert entry.state is ConfigEntryState.LOADED
+        entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+        by_unique = {e.unique_id: e.entity_id for e in entities}
+        assert hass.states.get(by_unique["niu_scooter_SN123_niu_cloud"]).state == "off"
+        tracker = hass.states.get(by_unique["niu_scooter_SN123_location"])
+        assert tracker.attributes["latitude"] == 52.359718
+        assert hass.states.get(by_unique["niu_scooter_SN123_gsm_signal"]).state == "31"
+
+    # Without a recent snapshot the entry waits for NIU as before.
+    snapshot["time"] = "2000-01-01T00:00:00+00:00"
+    await hass.config_entries.async_unload(entry.entry_id)
+    with patch(f"{api}.initialize", _down):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_RETRY

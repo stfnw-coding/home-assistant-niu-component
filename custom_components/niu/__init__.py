@@ -7,6 +7,7 @@ from pathlib import Path
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.storage import Store
 
 from .api import NiuApi
@@ -99,6 +100,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, RIDES_STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}.rides"
     )
     rides = RideLog(await rides_store.async_load())
+    snapshot_store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.snapshot")
     mapper = RideMapper(hass, entry.options.get(CONF_MAP_STYLE, DEFAULT_MAP_STYLE))
     coordinator = NiuDataUpdateCoordinator(
         hass,
@@ -112,8 +114,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         rides,
         rides_store,
         mapper,
+        snapshot_store,
     )
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except ConfigEntryNotReady:
+        # NIU's cloud is down: start with the last data it gave, if recent.
+        if not coordinator.restore_snapshot(await snapshot_store.async_load()):
+            raise
 
     entry_updates = {}
     if entry.unique_id is None:

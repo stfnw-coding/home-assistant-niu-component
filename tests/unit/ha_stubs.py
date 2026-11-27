@@ -255,8 +255,12 @@ def install_homeassistant_stubs() -> None:
     )
     helpers.entity_registry = entity_registry
 
+    exceptions = types.ModuleType("homeassistant.exceptions")
+    exceptions.ConfigEntryNotReady = type("ConfigEntryNotReady", (Exception,), {})
+
     modules = {
         "homeassistant": homeassistant,
+        "homeassistant.exceptions": exceptions,
         "homeassistant.helpers.entity_registry": entity_registry,
         "homeassistant.components.http": http,
         "homeassistant.components.websocket_api": websocket_api,
