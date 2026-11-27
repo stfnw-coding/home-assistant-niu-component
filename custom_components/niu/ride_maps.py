@@ -167,10 +167,17 @@ class RideMapper:
                 continue
             ride["map"], ride["map_source"] = result
             ride["route_checked"] = ROUTE_CHECK_VERSION
+            ride["map_drawn"] = dt_util.utcnow().isoformat()
             changed = True
         return changed
 
     async def _async_draw(self, log: RideLog, ride: dict, api) -> tuple[str, str] | None:
+        if ride.get("end_corrected") and ride.get("niu_end_point"):
+            # Decide again from NIU's own end point: an earlier correction may
+            # have been made from too few positions.
+            ride["end_point"] = ride["niu_end_point"]
+            ride.pop("end_corrected", None)
+            ride.pop("to", None)
         start, end = ride.get("start_point"), ride.get("end_point")
         ends = [tuple(start), tuple(end)] if start and end else None
 
@@ -203,6 +210,7 @@ class RideMapper:
                     ride["id"],
                     ride.get("distance_m"),
                 )
+                ride.setdefault("niu_end_point", ride.get("end_point"))
                 ride["end_point"] = route[-1]
                 ride["end_corrected"] = True
                 ride.pop("to", None)
@@ -264,6 +272,14 @@ class RideMapper:
         trail = []
         for state in states.get(entity_id, []):
             if not hasattr(state, "attributes"):
+                continue
+            updated = getattr(state, "last_updated", None)
+            if updated is not None and updated < start:
+                # Where the scooter was parked before the ride; NIU's start
+                # point already covers the start.
+                continue
+            if state.attributes.get("gps_signal") == 0:
+                # No GPS fix: NIU repeats an old position.
                 continue
             lat = state.attributes.get("latitude")
             lng = state.attributes.get("longitude")

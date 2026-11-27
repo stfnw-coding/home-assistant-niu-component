@@ -229,6 +229,37 @@ class RouteChoiceTest(unittest.TestCase):
         log.rides["NEW"]["route_checked"] = rides.ROUTE_CHECK_VERSION
         self.assertEqual(log.needing_map(NOW), [])
 
+    def test_ride_that_grew_is_checked_again_and_keeps_its_map(self) -> None:
+        """NIU lists a ride while it is still going on."""
+        log = rides.RideLog()
+        log.merge([track("T1", NOW, endTime=int(NOW.timestamp() * 1000) + 60_000)])
+        ride = log.rides["T1"]
+        ride.update({"map": "/m.jpg", "route_checked": rides.ROUTE_CHECK_VERSION})
+        log.merge([track("T1", NOW, endTime=int(NOW.timestamp() * 1000) + 1_200_000, distance=7079)])
+        self.assertEqual(ride["map"], "/m.jpg")
+        self.assertNotIn("route_checked", ride)
+        self.assertEqual([r["id"] for r in log.needing_map(NOW + timedelta(hours=1))], ["T1"])
+
+    def test_map_drawn_right_after_the_ride_is_drawn_again(self) -> None:
+        log = rides.RideLog()
+        log.merge([track("T1", NOW)])
+        ride = log.rides["T1"]
+        end = datetime.fromisoformat(ride["end"])
+        ride.update(
+            {
+                "map": "/m.jpg",
+                "route_checked": rides.ROUTE_CHECK_VERSION,
+                "map_drawn": (end + timedelta(minutes=1)).isoformat(),
+            }
+        )
+        # Not yet: the positions may still be coming in.
+        self.assertEqual(log.needing_map(end + timedelta(minutes=2)), [])
+        self.assertEqual(
+            [r["id"] for r in log.needing_map(end + timedelta(minutes=10))], ["T1"]
+        )
+        ride["map_drawn"] = (end + timedelta(minutes=10)).isoformat()
+        self.assertEqual(log.needing_map(end + timedelta(minutes=20)), [])
+
 
 class PlaceRefreshTest(unittest.TestCase):
     def test_moved_end_point_gets_a_new_place_name(self) -> None:

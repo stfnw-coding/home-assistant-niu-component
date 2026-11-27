@@ -373,6 +373,27 @@ async def test_full_setup(hass: HomeAssistant, hass_ws_client) -> None:
             by_unique["niu_scooter_SN123_battery_BN1GPC2B55100049_charge"]
         ).state == "95"
 
+        # NIU's cloud has a hiccup: the last values stay, the cloud sensor says so.
+        cloud = by_unique["niu_scooter_SN123_niu_cloud"]
+        assert hass.states.get(cloud).state == "on"
+        from custom_components.niu.api import NiuServerError
+
+        def _down(self):
+            raise NiuServerError(504)
+
+        with patch(f"{api}.updateBat", _down):
+            await coordinator.async_refresh()
+            await hass.async_block_till_done()
+        assert coordinator.last_update_success
+        assert hass.states.get(cloud).state == "off"
+        assert "504" in hass.states.get(cloud).attributes["laatste_fout"]
+        assert hass.states.get(
+            by_unique["sensor.niu_scooter_SN123_battery_charge_a"]
+        ).state != "unavailable"
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+        assert hass.states.get(cloud).state == "on"
+
         # Options flow switches the map style and reloads.
         result = await hass.config_entries.options.async_init(entry.entry_id)
         assert result["type"] == "form"
@@ -428,6 +449,12 @@ async def test_trail_from_recorder(recorder_mock, hass: HomeAssistant) -> None:
         tracker = er.async_get(hass).async_get_entity_id(
             "device_tracker", DOMAIN, "niu_scooter_SN123_location"
         )
+        # Parked before the ride, with an old position NIU keeps repeating.
+        hass.states.async_set(
+            tracker, "not_home",
+            {"latitude": 52.30, "longitude": 4.80, "source_type": "gps", "gps_signal": 0},
+        )
+        await hass.async_block_till_done()
         start = dt_util.utcnow()
         for lat, lng in ((52.3645, 4.8578), (52.3716, 4.8829), (52.3893, 4.9032)):
             hass.states.async_set(
@@ -438,8 +465,8 @@ async def test_trail_from_recorder(recorder_mock, hass: HomeAssistant) -> None:
         coordinator = hass.data[DOMAIN][entry.entry_id]
         mapper = coordinator._ride_mapper
         ride = {
-            "start": (start - timedelta(seconds=10)).isoformat(),
+            "start": start.isoformat(),
             "end": (dt_util.utcnow() + timedelta(seconds=1)).isoformat(),
         }
         trail = await mapper._async_trail(ride, coordinator.api)
-        assert trail[-3:] == [(52.3645, 4.8578), (52.3716, 4.8829), (52.3893, 4.9032)]
+        assert trail == [(52.3645, 4.8578), (52.3716, 4.8829), (52.3893, 4.9032)]

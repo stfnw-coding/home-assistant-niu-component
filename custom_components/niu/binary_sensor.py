@@ -64,7 +64,10 @@ BINARY_SENSORS = (
 async def async_setup_entry(hass, entry, async_add_entities) -> None:
     coordinator: NiuDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        NiuBinarySensor(coordinator, description) for description in BINARY_SENSORS
+        [
+            *(NiuBinarySensor(coordinator, description) for description in BINARY_SENSORS),
+            NiuCloudSensor(coordinator),
+        ]
     )
 
 
@@ -85,3 +88,36 @@ class NiuBinarySensor(NiuCoordinatorEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         return self._description.value(self.coordinator.data)
+
+
+class NiuCloudSensor(NiuCoordinatorEntity, BinarySensorEntity):
+    """Whether NIU's cloud answered the last update.
+
+    While it does not, the other entities keep their last values; this
+    entity tells the dashboard that those values are not live.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "niu_cloud"
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_icon = "mdi:cloud-check-outline"
+
+    def __init__(self, coordinator: NiuDataUpdateCoordinator) -> None:
+        NiuCoordinatorEntity.__init__(self, coordinator)
+        self._attr_unique_id = f"niu_scooter_{coordinator.data.sn}_niu_cloud"
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.last_update_success and not self.coordinator.stale
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        last = self.coordinator.last_success
+        return {
+            "laatste_update": last.isoformat() if last else None,
+            "laatste_fout": self.coordinator.last_error,
+        }

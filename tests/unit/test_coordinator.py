@@ -138,6 +138,79 @@ class CoordinatorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(raised.exception.retry_after, 420)
 
+    async def test_failed_update_keeps_the_last_data(self) -> None:
+        """A hiccup in NIU's cloud must not make every entity unavailable."""
+        api_module = importlib.import_module("custom_components.niu.api")
+
+        class FlakyApi(FakeApi):
+            fail = False
+
+            def updateBat(self) -> None:
+                if self.fail:
+                    raise api_module.NiuServerError(504)
+                super().updateBat()
+
+        api = FlakyApi()
+        coordinator = self.coordinator_module.NiuDataUpdateCoordinator(
+            FakeHass(), None, api, {self.const.SENSOR_TYPE_BAT}
+        )
+        await coordinator.async_config_entry_first_refresh()
+        self.assertFalse(coordinator.stale)
+
+        api.fail = True
+        self.assertIs(await coordinator._async_update_data(), api)
+        self.assertTrue(coordinator.stale)
+        self.assertIn("504", coordinator.last_error)
+
+        api.fail = False
+        await coordinator._async_update_data()
+        self.assertFalse(coordinator.stale)
+
+    async def test_long_outage_still_fails(self) -> None:
+        """After KEEP_LAST_DATA the entities do become unavailable."""
+        api_module = importlib.import_module("custom_components.niu.api")
+        dt_util = importlib.import_module("homeassistant.util.dt")
+
+        class DownApi(FakeApi):
+            def updateBat(self) -> None:
+                raise api_module.NiuServerError(502)
+
+        api = DownApi()
+        coordinator = self.coordinator_module.NiuDataUpdateCoordinator(
+            FakeHass(), None, api, {self.const.SENSOR_TYPE_BAT}
+        )
+        coordinator._initialized = True
+        coordinator.data = api
+        coordinator.last_success = (
+            dt_util.utcnow() - self.coordinator_module.KEEP_LAST_DATA * 2
+        )
+        with self.assertRaises(self.coordinator_module.UpdateFailed):
+            await coordinator._async_update_data()
+
+    async def test_rate_limit_with_data_backs_off_quietly(self) -> None:
+        api_module = importlib.import_module("custom_components.niu.api")
+
+        class RateLimitedApi(FakeApi):
+            limited = False
+
+            def updateBat(self) -> None:
+                if self.limited:
+                    raise api_module.NiuRateLimitError(420)
+                super().updateBat()
+
+        api = RateLimitedApi()
+        coordinator = self.coordinator_module.NiuDataUpdateCoordinator(
+            FakeHass(), None, api, {self.const.SENSOR_TYPE_BAT}
+        )
+        await coordinator.async_config_entry_first_refresh()
+        api.limited = True
+        await coordinator._async_update_data()
+        calls = len(api.calls)
+        # Within the back-off NIU is not asked at all.
+        await coordinator._async_update_data()
+        self.assertEqual(len(api.calls), calls)
+        self.assertTrue(coordinator.stale)
+
     def test_legacy_battery_sensors_still_require_battery_endpoint(self) -> None:
         """Existing entries with pre-dual-battery names must keep polling."""
         groups = self.coordinator_module.required_sensor_groups(

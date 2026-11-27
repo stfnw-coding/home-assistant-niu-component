@@ -17,7 +17,7 @@ TRAIL_DAYS = 9
 # NIU's route counts as complete when it covers this share of the ride.
 ROUTE_COMPLETE_SHARE = 0.6
 # Bumped when the route check improves, so recent rides are checked again.
-ROUTE_CHECK_VERSION = 2
+ROUTE_CHECK_VERSION = 3
 # How far back the first backfill reads the ride history.
 BACKFILL_DAYS = 120
 # NIU's ride list is paged: "index" is the page number, not an offset.
@@ -99,6 +99,10 @@ _NIU_FIELDS = (
 )
 
 
+# A map drawn this soon after the ride ended may miss the last positions.
+MAP_SETTLE = timedelta(minutes=5)
+
+
 class RideLog:
     """All rides seen so far, with the map and place names worked out for them."""
 
@@ -161,6 +165,10 @@ class RideLog:
                         existing.pop("map", None)
                         existing.pop("map_source", None)
                         existing.pop("route_checked", None)
+                    elif field in ("end", "distance_m"):
+                        # The ride was still going on when it was first seen:
+                        # check the route again, keeping the map until then.
+                        existing.pop("route_checked", None)
                     # A moved start or end point needs its place name again.
                     if field == "start_point":
                         existing.pop("from", None)
@@ -188,8 +196,11 @@ class RideLog:
             ride
             for ride in self.ordered()
             if ride.get("map")
-            and ride.get("route_checked") != ROUTE_CHECK_VERSION
             and (ride.get("start") or "") >= recent
+            and (
+                ride.get("route_checked") != ROUTE_CHECK_VERSION
+                or drawn_too_early(ride, now)
+            )
         ]
         return missing + unchecked
 
@@ -313,6 +324,25 @@ def choose_route(
     if len(route) >= 2 and path_length(route) > niu_length * 1.3:
         return "ha", route
     return "niu", None
+
+
+def drawn_too_early(ride: dict, now: datetime) -> bool:
+    """Whether the map was drawn before the ride's last positions were in."""
+    drawn = _parse(ride.get("map_drawn"))
+    end = _parse(ride.get("end"))
+    if drawn is None or end is None:
+        return False
+    return drawn < end + MAP_SETTLE <= now
+
+
+def _parse(value) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def zone_name(point: list[float], zones: list[dict]) -> str | None:

@@ -121,6 +121,9 @@
             },
             "alarm_armed": {
                 "name": "Alarm ingeschakeld"
+            },
+            "niu_cloud": {
+                "name": "NIU-cloud bereikbaar"
             }
         }
     },

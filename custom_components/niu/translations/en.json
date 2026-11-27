@@ -122,6 +122,9 @@
             },
             "alarm_armed": {
                 "name": "Alarm armed"
+            },
+            "niu_cloud": {
+                "name": "NIU cloud reachable"
             }
         }
     },

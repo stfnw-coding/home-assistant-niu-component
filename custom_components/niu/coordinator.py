@@ -15,7 +15,7 @@ from homeassistant.util import dt as dt_util
 
 from .api import TRACK_PAGE_SIZE, NiuApi, NiuApiError, NiuRateLimitError, track_items
 from .battery import BatteryRegistry
-from .rides import BACKFILL_PAGES_PER_STEP, RideLog
+from .rides import BACKFILL_PAGES_PER_STEP, RideLog, distance_m
 from .const import (
     DOMAIN,
     EVENT_NIU_MESSAGE,
@@ -33,6 +33,13 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 POLL_INTERVAL = timedelta(seconds=150)
+# Poll faster while the scooter is switched on: more positions for the ride map.
+RIDING_POLL_INTERVAL = timedelta(seconds=60)
+# Keep polling fast this long after the scooter last moved.
+RIDING_LINGER = 5 * 60
+MOVED_METERS = 80
+# While NIU's cloud has a hiccup, keep showing the last data this long.
+KEEP_LAST_DATA = timedelta(hours=6)
 BATTERY_SAVE_DELAY = 60
 DEFAULT_RATE_LIMIT_BACKOFF = 300
 MIN_RATE_LIMIT_BACKOFF = 30
@@ -96,6 +103,36 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
         self._battery_health: dict | None = None
         self._next_fetch: dict[str, float] = {}
         self._new_messages: list[dict] = []
+        # When NIU last answered, and why the most recent update failed.
+        self.last_success = None
+        self.last_error: str | None = None
+        self._skip_until = 0.0
+        self._last_position: tuple[float, float] | None = None
+        self._riding_until = 0.0
+
+    @property
+    def stale(self) -> bool:
+        """Whether the entities show data from before a failed update."""
+        return self.last_error is not None
+
+    def _can_keep_data(self) -> bool:
+        return (
+            self.data is not None
+            and self.last_success is not None
+            and dt_util.utcnow() - self.last_success < KEEP_LAST_DATA
+        )
+
+    def _keep_data(self, reason: str) -> NiuApi:
+        if self.last_error is None:
+            _LOGGER.warning(
+                "NIU did not answer (%s); showing the last data from %s",
+                reason,
+                self.last_success.isoformat() if self.last_success else "?",
+            )
+        else:
+            _LOGGER.debug("NIU still not answering: %s", reason)
+        self.last_error = reason
+        return self.data
 
     def _sync_update_data(self) -> NiuApi:
         """Initialize once, then update each required endpoint exactly once."""
@@ -219,7 +256,13 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
             )
 
     async def _async_update_data(self) -> NiuApi:
-        """Fetch NIU data without blocking Home Assistant's event loop."""
+        """Fetch NIU data without blocking Home Assistant's event loop.
+
+        A failed update keeps the last data (for up to KEEP_LAST_DATA), so a
+        hiccup in NIU's cloud does not make every entity unavailable.
+        """
+        if monotonic() < self._skip_until and self._can_keep_data():
+            return self.data
         try:
             api = await self.hass.async_add_executor_job(self._sync_update_data)
         except NiuRateLimitError as err:
@@ -228,20 +271,62 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
                 MIN_RATE_LIMIT_BACKOFF,
                 min(retry_after, MAX_RATE_LIMIT_BACKOFF),
             )
+            if self._can_keep_data():
+                self._skip_until = monotonic() + retry_after
+                return self._keep_data("rate limit")
             raise UpdateFailed(
                 "NIU API rate limit exceeded", retry_after=retry_after
             ) from err
         except NiuApiError as err:
+            if self._can_keep_data():
+                return self._keep_data(str(err))
             raise UpdateFailed(f"NIU API update failed: {err}") from err
         except Exception as err:
             _LOGGER.exception("Unexpected error while updating NIU data")
+            if self._can_keep_data():
+                return self._keep_data("unexpected error")
             raise UpdateFailed("Unexpected error while updating NIU data") from err
+        if self.last_error is not None:
+            _LOGGER.info("NIU answers again")
+        self.last_error = None
+        self.last_success = dt_util.utcnow()
+        self._adjust_interval(api)
         self._process_batteries(api)
         await self._async_process_rides(api)
         for message in reversed(self._new_messages):
             self.hass.bus.async_fire(EVENT_NIU_MESSAGE, message_event(message))
         self._new_messages.clear()
         return api
+
+    def _adjust_interval(self, api: NiuApi) -> None:
+        """Poll faster during a ride, for a more detailed route on the map.
+
+        NIU's ignition flag is not reliable on every scooter, so a ride is
+        also recognised by the scooter's speed or by its position moving.
+        """
+        moving = False
+        try:
+            if str(api.getDataMoto("isAccOn")).strip().lower() in ("1", "true", "on"):
+                moving = True
+            if (_float(api.getDataMoto("nowSpeed")) or 0) > 0:
+                moving = True
+            lat, lng = _float(api.getDataPos("lat")), _float(api.getDataPos("lng"))
+        except Exception:  # noqa: BLE001 - only a polling hint
+            lat = lng = None
+        if lat is not None and lng is not None and (lat, lng) != (0, 0):
+            if (
+                self._last_position is not None
+                and distance_m(self._last_position, (lat, lng)) > MOVED_METERS
+            ):
+                moving = True
+            self._last_position = (lat, lng)
+        if moving:
+            self._riding_until = monotonic() + RIDING_LINGER
+        self.update_interval = (
+            RIDING_POLL_INTERVAL
+            if monotonic() < self._riding_until
+            else POLL_INTERVAL
+        )
 
     async def _async_process_rides(self, api: NiuApi) -> None:
         if self._ride_mapper is not None:
@@ -280,3 +365,10 @@ def message_event(message: dict) -> dict:
         "sub_category": message.get("subCate"),
         "time": when,
     }
+
+
+def _float(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
