@@ -25,6 +25,8 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+# NIU statuses that mean "log in again" on an ordinary request.
+TOKEN_REJECTED_STATUSES = (1131,)
 
 APP_ID = "niu_ktdrr960"
 REQUEST_TIMEOUT = (10, 30)
@@ -282,10 +284,10 @@ class NiuApi:
         attempted_generation = self._auth_generation
         response = self._perform_request(method, path, headers=headers, **kwargs)
 
-        if response.status_code == 401:
+        if response.status_code == 401 or _token_rejected(response):
             self._recover_authentication(attempted_generation)
             response = self._perform_request(method, path, headers=headers, **kwargs)
-            if response.status_code == 401:
+            if response.status_code == 401 or _token_rejected(response):
                 raise NiuAuthenticationError(
                     "NIU rejected authentication after token recovery"
                 )
@@ -780,6 +782,18 @@ class NiuApi:
         self.track_points = points
         self.track_points_id = track_id
         self._track_detail_failed_id = None
+
+
+def _token_rejected(response) -> bool:
+    """NIU answers HTTP 200 with status 1131 when it no longer accepts the token,
+    for instance after the account logged in elsewhere."""
+    if response.status_code != 200:
+        return False
+    try:
+        payload = response.json()
+    except (ValueError, requests.exceptions.RequestException):
+        return False
+    return isinstance(payload, dict) and payload.get("status") in TOKEN_REJECTED_STATUSES
 
 
 def _data_items(payload) -> list[dict]:

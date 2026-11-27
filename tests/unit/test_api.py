@@ -182,6 +182,22 @@ class NiuApiTest(unittest.TestCase):
         self.assertEqual(refresh_data["grant_type"], "refresh_token")
         self.assertEqual(refresh_data["refresh_token"], "refresh-token")
 
+    def test_status_1131_logs_in_again_and_retries(self) -> None:
+        """NIU answers HTTP 200 with status 1131 when the token is no longer valid."""
+        self.set_authenticated("old-access", refresh_token="refresh-token")
+        api_module.requests.get.side_effect = [
+            FakeResponse(200, {"status": 1131, "desc": "Fout inloggegevens"}),
+            data_response("recovered"),
+        ]
+        api_module.requests.post.return_value = token_response("new-access")
+
+        with patch.object(api_module, "monotonic", return_value=0):
+            result = self.api.get_info(api_module.MOTOR_BATTERY_API_URI)
+
+        self.assertEqual(result["data"]["value"], "recovered")
+        retry_headers = api_module.requests.get.call_args_list[1].kwargs["headers"]
+        self.assertEqual(retry_headers["token"], "new-access")
+
     def test_401_relogs_in_when_refresh_token_is_rejected(self) -> None:
         """A rejected refresh token should fall back to a password login."""
         self.set_authenticated("old-access", refresh_token="invalid-refresh")
